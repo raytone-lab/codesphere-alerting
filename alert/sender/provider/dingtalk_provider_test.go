@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ccfos/nightingale/v6/models"
 )
@@ -147,4 +148,77 @@ func TestDingtalkProviderNotifyWithAppConfig(t *testing.T) {
 			t.Fatalf("should not touch dingtalk open api without image, got %d: %v", n, tr.urls)
 		}
 	})
+}
+
+func TestDingTalkSECErrorAvoidsRedactMarkers(t *testing.T) {
+	lower := strings.ToLower(dingTalkSECAsWebhookIDErr)
+	for _, marker := range []string{"password", "passwd", "secret", "token", "authorization", "api_key", "apikey", "authusername", "authpassword", "header"} {
+		if strings.Contains(lower, marker) {
+			t.Fatalf("error text contains redact marker %q: %s", marker, dingTalkSECAsWebhookIDErr)
+		}
+	}
+}
+
+func TestApplyDingTalkRobotSignRejectsSECToken(t *testing.T) {
+	cfg := &models.HTTPRequestConfig{URL: dingtalkTestWebhookURL}
+	_, err := applyDingTalkRobotSign(cfg, map[string]string{
+		"access_token": "SECdeadbeef",
+	}, time.UnixMilli(1700000000000))
+	if err == nil || !strings.Contains(err.Error(), "starts with SEC") {
+		t.Fatalf("error = %v, want SEC webhook-id hint", err)
+	}
+}
+
+func TestApplyDingTalkRobotSignAddsTimestampAndSign(t *testing.T) {
+	now := time.UnixMilli(1700000000000)
+	src := &models.HTTPRequestConfig{
+		URL: "https://oapi.dingtalk.com/robot/send",
+		Request: models.RequestDetail{
+			Parameters: map[string]string{"access_token": "{{$params.access_token}}"},
+		},
+	}
+	got, err := applyDingTalkRobotSign(src, map[string]string{
+		"access_token": "real-webhook-token",
+		"secret":       "SECtest",
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTS, wantSign := dingTalkSign("SECtest", now)
+	if got.Request.Parameters["timestamp"] != wantTS || got.Request.Parameters["sign"] != wantSign {
+		t.Fatalf("parameters = %#v", got.Request.Parameters)
+	}
+	if src.Request.Parameters["timestamp"] != "" {
+		t.Fatal("must not mutate the shared channel config")
+	}
+}
+
+func TestDingtalkProviderNotifySignsWebhook(t *testing.T) {
+	tr := &dingtalkRecordingTransport{}
+	req := newDingtalkNotifyRequest(nil, false, &http.Client{Transport: tr})
+	req.CustomParams = map[string]string{
+		"access_token": "real-webhook-token",
+		"secret":       "SECtest",
+	}
+	req.Config.RequestConfig.HTTPRequestConfig.Request.Parameters = map[string]string{
+		"access_token": "{{$params.access_token}}",
+	}
+
+	result := (&DingtalkProvider{}).Notify(context.Background(), req)
+	if result.Err != nil {
+		t.Fatalf("notify failed: %v, response: %s", result.Err, result.Response)
+	}
+	if len(tr.urls) != 1 {
+		t.Fatalf("urls = %v", tr.urls)
+	}
+	u := tr.urls[0]
+	if !strings.Contains(u, "access_token=real-webhook-token") {
+		t.Fatalf("missing access_token in %s", u)
+	}
+	if !strings.Contains(u, "timestamp=") || !strings.Contains(u, "sign=") {
+		t.Fatalf("missing sign query in %s", u)
+	}
+	if strings.Contains(u, "SECtest") {
+		t.Fatalf("secret leaked into url: %s", u)
+	}
 }

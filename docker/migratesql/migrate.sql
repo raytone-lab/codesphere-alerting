@@ -522,3 +522,32 @@ ALTER TABLE `source_token` ADD KEY `idx_source_token_token` (`token`);
    PostgreSQL 请执行：ALTER TABLE users ADD COLUMN disabled int NOT NULL DEFAULT 0;
    通常不需要手工执行，程序启动时的 AutoMigrate 会补上这一列 */
 ALTER TABLE `users` ADD COLUMN `disabled` int NOT NULL DEFAULT 0 COMMENT '0:enabled 1:disabled';
+
+CREATE TABLE IF NOT EXISTS `balance_alert_configs` (
+  `billing_account_id` varchar(128) NOT NULL,
+  `enabled` tinyint(1) NOT NULL DEFAULT 1,
+  `current_state` varchar(16) NOT NULL DEFAULT 'NORMAL',
+  `state_since` datetime DEFAULT NULL,
+  `last_alert_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`billing_account_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `balance_alert_records` (
+  `id` varchar(64) NOT NULL,
+  `billing_account_id` varchar(128) NOT NULL,
+  `level` varchar(16) NOT NULL,
+  `balance_usd` decimal(20,6) NOT NULL,
+  `threshold_usd` decimal(20,6) NOT NULL,
+  `threshold_mode` varchar(32) NOT NULL,
+  `send_mode` varchar(16) NOT NULL,
+  `status` varchar(32) NOT NULL,
+  `channel` varchar(16) DEFAULT NULL,
+  `receiver` varchar(255) DEFAULT NULL,
+  `sent_at` datetime DEFAULT NULL,
+  `operator_review` varchar(32) DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_balance_alert_account_created` (`billing_account_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

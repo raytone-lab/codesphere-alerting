@@ -2,7 +2,13 @@ package provider
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ccfos/nightingale/v6/models"
 	"github.com/toolkits/pkg/logger"
@@ -51,7 +57,61 @@ func (p *DingtalkProvider) Notify(ctx context.Context, req *NotifyRequest) *Noti
 		}
 	}
 
+	httpConfig, err := applyDingTalkRobotSign(httpConfig, req.CustomParams, time.Now())
+	if err != nil {
+		return &NotifyResult{Target: getNotifyTarget(req.CustomParams, req.Sendtos), Err: err}
+	}
+
 	resp, err := SendHTTPRequest(httpConfig, req.Events, req.TplContent,
 		req.CustomParams, req.Sendtos, req.HttpClient)
 	return &NotifyResult{Target: getNotifyTarget(req.CustomParams, req.Sendtos), Response: resp, Err: err}
+}
+
+func applyDingTalkRobotSign(httpConfig *models.HTTPRequestConfig, params map[string]string, now time.Time) (*models.HTTPRequestConfig, error) {
+	token := strings.TrimSpace(params["access_token"])
+	if strings.HasPrefix(token, "SEC") {
+		return httpConfig, fmt.Errorf("%s", dingTalkSECAsWebhookIDErr)
+	}
+	secret := strings.TrimSpace(params["secret"])
+	if secret == "" {
+		return httpConfig, nil
+	}
+	if httpConfig == nil {
+		return nil, fmt.Errorf("http request config is nil")
+	}
+	cfg := copyHTTPRequestConfig(httpConfig)
+	if cfg.Request.Parameters == nil {
+		cfg.Request.Parameters = make(map[string]string, 2)
+	}
+	ts, sign := dingTalkSign(secret, now)
+	cfg.Request.Parameters["timestamp"] = ts
+	cfg.Request.Parameters["sign"] = sign
+	return cfg, nil
+}
+
+func copyHTTPRequestConfig(src *models.HTTPRequestConfig) *models.HTTPRequestConfig {
+	dst := *src
+	if src.Headers != nil {
+		dst.Headers = make(map[string]string, len(src.Headers))
+		for k, v := range src.Headers {
+			dst.Headers[k] = v
+		}
+	}
+	if src.Request.Parameters != nil {
+		dst.Request.Parameters = make(map[string]string, len(src.Request.Parameters)+2)
+		for k, v := range src.Request.Parameters {
+			dst.Request.Parameters[k] = v
+		}
+	}
+	return &dst
+}
+
+// Avoid words that test-fire redactSensitive treats as credentials (token/secret/password).
+const dingTalkSECAsWebhookIDErr = "DingTalk robot credential starts with SEC; that is the HMAC signing key, not the webhook id. Copy the id from the robot webhook URL, and if 加签 is enabled put the SEC value in the 加签 field"
+
+func dingTalkSign(secret string, now time.Time) (timestamp, sign string) {
+	ts := strconv.FormatInt(now.UnixMilli(), 10)
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write([]byte(ts + "\n" + secret))
+	return ts, base64.StdEncoding.EncodeToString(h.Sum(nil))
 }

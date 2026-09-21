@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	htmltemplate "html/template"
@@ -71,6 +72,9 @@ func SendHTTPRequest(httpConfig *models.HTTPRequestConfig, events []*models.Aler
 			logger.Errorf("send_http: failed to read response. url=%s error=%v", safeURL, err)
 		}
 		if resp.StatusCode == http.StatusOK {
+			if bizErr := webhookErrCodeError(respBody); bizErr != nil {
+				return fmt.Sprintf("status_code:%d, response:%s", resp.StatusCode, string(respBody)), bizErr
+			}
 			return fmt.Sprintf("status_code:%d, response:%s", resp.StatusCode, string(respBody)), nil
 		}
 
@@ -221,6 +225,45 @@ func makeHTTPRequest(httpConfig *models.HTTPRequestConfig, url string, headers m
 	logger.Debugf("URL: %v, Method: %s, Headers: %+v, params: %+v, Body: %s", req.URL, req.Method, req.Header, query, string(body))
 
 	return req, nil
+}
+
+// webhookErrCodeError treats DingTalk/WeCom-style JSON bodies as failure when
+// errcode is present and not 0. HTTP 200 is not enough: those APIs return 200
+// with {"errcode":300005,"errmsg":"token is not exist"}. Non-JSON bodies and
+// JSON without errcode stay successful so callback webhooks are unchanged.
+func webhookErrCodeError(body []byte) error {
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 || body[0] != '{' {
+		return nil
+	}
+	var envelope struct {
+		ErrCode json.RawMessage `json:"errcode"`
+		ErrMsg  string          `json:"errmsg"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil
+	}
+	code := strings.Trim(strings.TrimSpace(string(envelope.ErrCode)), "\"")
+	if code == "" || code == "0" || code == "null" {
+		return nil
+	}
+	msg := strings.TrimSpace(envelope.ErrMsg)
+	if msg == "" {
+		return fmt.Errorf("webhook errcode=%s", code)
+	}
+	return fmt.Errorf("webhook errcode=%s errmsg=%s", code, rewriteWebhookErrMsg(msg))
+}
+
+// rewriteWebhookErrMsg keeps DingTalk/WeCom errmsg readable in test-fire.
+// The UI redacts any text containing token/secret/password.
+func rewriteWebhookErrMsg(msg string) string {
+	switch strings.ToLower(msg) {
+	case "token is not exist":
+		return "webhook id is not exist"
+	default:
+		r := strings.NewReplacer("token", "credential", "Token", "credential", "secret", "key", "Secret", "key", "password", "passwd")
+		return r.Replace(msg)
+	}
 }
 
 func getNotifyTarget(customParams map[string]string, sendtos []string) string {

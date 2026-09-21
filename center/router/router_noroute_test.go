@@ -54,9 +54,16 @@ func noRouteCases() []noRouteCase {
 		// 资源确实不存在时必须 404：前端 loadTemplate 判的是 res.ok，
 		// 返回 200 + index.html 会把整个 HTML 当模板内容塞进 toml 编辑器
 		{"missing collect template", "/n9e-collect-templates/not-exist.toml", http.StatusNotFound, ""},
-		// 前端路由（含带点的 ident）依旧交给 SPA
+		// 前端路由（含带点的 ident）依旧交给 SPA；已下线的基础设施路由直接 404
 		{"spa route", "/alert-rules/1", http.StatusOK, "n9e spa"},
-		{"spa route with dots", "/targets/10.99.1.107", http.StatusOK, "n9e spa"},
+		{"removed infrastructure spa", "/targets/10.99.1.107", http.StatusNotFound, "not found"},
+		{"removed dashboards spa", "/dashboards", http.StatusNotFound, "not found"},
+		{"removed targets api", "/api/n9e/targets", http.StatusNotFound, "not found"},
+		{"unmatched datasources get", "/api/n9e/datasources", http.StatusNotFound, "not found"},
+		{"unregistered metric-views api", "/api/n9e/metric-views", http.StatusNotFound, "not found"},
+		{"removed landing spa", "/landing", http.StatusNotFound, "not found"},
+		{"removed home spa", "/home", http.StatusNotFound, "not found"},
+		{"home redirects to alert-rules", "/", http.StatusFound, ""},
 	}
 }
 
@@ -71,6 +78,9 @@ func runNoRouteCases(t *testing.T, r *gin.Engine) {
 
 			if w.Code != tc.wantStatus {
 				t.Fatalf("path %s: status = %d, want %d, body=%q", tc.path, w.Code, tc.wantStatus, w.Body.String())
+			}
+			if tc.name == "home redirects to alert-rules" && w.Header().Get("Location") != "/alert-rules" {
+				t.Fatalf("redirect location = %q", w.Header().Get("Location"))
 			}
 			if tc.wantBody != "" && !strings.Contains(w.Body.String(), tc.wantBody) {
 				t.Fatalf("path %s: body = %q, want contains %q", tc.path, w.Body.String(), tc.wantBody)

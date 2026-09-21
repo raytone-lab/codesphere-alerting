@@ -16,6 +16,53 @@ func (rt *Router) rolesGets(c *gin.Context) {
 	ginx.NewRender(c).Data(lst, err)
 }
 
+// hiddenSidebarMenus are FE menu keys we do not expose in /self/perms,
+// so 数据查询 / AI配置 / 关于产品 stay off the sidebar.
+var hiddenSidebarMenus = map[string]struct{}{
+	"/metric/explorer":       {},
+	"/object/explorer":       {},
+	"/metrics-built-in":      {},
+	"/recording-rules":       {},
+	"/recording-rules/add":   {},
+	"/recording-rules/put":   {},
+	"/recording-rules/del":   {},
+	"/log/explorer":          {},
+	"/log/index-patterns":    {},
+	"/ai-config/llm-configs": {},
+	"/ai-config/agents":      {},
+	"/ai-config/skills":      {},
+	"/system/version":        {},
+	"/help/version":          {},
+	"/targets":               {},
+	"/targets/put":           {},
+	"/targets/del":           {},
+	"/targets/bind":          {},
+	"/dashboards":            {},
+	"/dashboards/add":        {},
+	"/dashboards/put":        {},
+	"/dashboards/del":        {},
+	"/public-dashboards":     {},
+	"/embedded-dashboards":   {},
+	"/embedded-products":     {},
+	"/embedded-product/add":  {},
+	"/embedded-product/put":  {},
+	"/embedded-product/delete": {},
+	"/landing":                 {},
+	"/home":                    {},
+	"/overview":                {},
+}
+
+func filterSidebarPerms(lst []string) []string {
+	out := make([]string, 0, len(lst))
+	for _, p := range lst {
+		if _, hide := hiddenSidebarMenus[p]; hide {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 func (rt *Router) permsGets(c *gin.Context) {
 	user := c.MustGet("user").(*models.User)
 	if user.IsAdmin() {
@@ -25,12 +72,12 @@ func (rt *Router) permsGets(c *gin.Context) {
 				lst = append(lst, op.Name)
 			}
 		}
-		ginx.NewRender(c).Data(lst, nil)
+		ginx.NewRender(c).Data(filterSidebarPerms(lst), nil)
 		return
 	}
 
 	lst, err := models.OperationsOfRole(rt.Ctx, strings.Fields(user.Roles))
-	ginx.NewRender(c).Data(lst, err)
+	ginx.NewRender(c).Data(filterSidebarPerms(lst), err)
 }
 
 // 创建角色

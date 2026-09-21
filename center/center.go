@@ -16,6 +16,7 @@ import (
 	"github.com/ccfos/nightingale/v6/alert/dispatch"
 	"github.com/ccfos/nightingale/v6/alert/process"
 	alertrt "github.com/ccfos/nightingale/v6/alert/router"
+	"github.com/ccfos/nightingale/v6/balancealert"
 	"github.com/ccfos/nightingale/v6/center/cconf"
 	"github.com/ccfos/nightingale/v6/center/cconf/rsa"
 	"github.com/ccfos/nightingale/v6/center/integration"
@@ -76,7 +77,6 @@ func Initialize(configDir string, cryptoKey string) (func(), error) {
 	ctx := ctx.NewContext(context.Background(), db, true)
 	migrate.Migrate(db)
 	isRootInit := models.InitRoot(ctx)
-	models.InitDefaultAIAgent(ctx)
 
 	config.HTTP.JWTAuth.SigningKey = models.InitJWTSigningKey(ctx)
 
@@ -189,6 +189,7 @@ func Initialize(configDir string, cryptoKey string) (func(), error) {
 	go cron.CleanNotifyRecord(ctx, config.Center.CleanNotifyRecordDay)
 	go cron.CleanPipelineExecution(ctx, config.Center.CleanPipelineExecutionDay)
 	go cron.CleanAlertHisEvent(ctx, config.Center.CleanAlertHisEventDay)
+	go balancealert.StartCron(ctx)
 
 	alertrtRouter := alertrt.New(config.HTTP, config.Alert, alertMuteCache, targetCache, busiGroupCache, alertStats, ctx, externalProcessors, config.Log.Dir)
 	centerRouter := centerrt.New(config.HTTP, config.Center, config.Alert, config.Ibex,

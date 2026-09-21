@@ -25,7 +25,7 @@ const (
 )
 
 var (
-	regx = `(?i)from\s+((?:"[^"]+"|[a-zA-Z0-9_]+))\.((?:"[^"]+"|[a-zA-Z0-9_]+))\.((?:"[^"]+"|[a-zA-Z0-9_]+))`
+	fromThree = regexp.MustCompile(`(?i)from\s+((?:"[^"]+"|[a-zA-Z0-9_]+))\.((?:"[^"]+"|[a-zA-Z0-9_]+))\.((?:"[^"]+"|[a-zA-Z0-9_]+))`)
 )
 
 func init() {
@@ -51,7 +51,10 @@ func (p *PostgreSQL) InitClient() error {
 		return fmt.Errorf("not found postgresql addr, please check datasource config")
 	}
 	for _, shard := range p.Shards {
-		dbName := shard.DB
+		dbName := strings.TrimSpace(shard.DB)
+		if dbName == "" {
+			_, dbName = postgres.SplitHostDatabase(shard.Addr)
+		}
 		if dbName == "" {
 			dbName = "postgres"
 		}
@@ -129,6 +132,10 @@ func (p *PostgreSQL) Equal(d datasource.Datasource) bool {
 		return false
 	}
 
+	if oldShard.DB != newShard.DB {
+		return false
+	}
+
 	return true
 }
 
@@ -177,15 +184,9 @@ func (p *PostgreSQL) QueryData(ctx context.Context, query interface{}) ([]models
 			return nil, err
 		}
 	}
-	if postgresqlQueryParam.Database != "" {
-		p.Shards[0].DB = postgresqlQueryParam.Database
-	} else {
-		db, err := parseDBName(postgresqlQueryParam.SQL)
-		if err != nil {
-			return nil, err
-		}
-		p.Shards[0].DB = db
-	}
+	origDB := p.Shards[0].DB
+	p.Shards[0].DB = resolveDatabase(origDB, p.Shards[0].Addr, postgresqlQueryParam)
+	defer func() { p.Shards[0].DB = origDB }()
 
 	timeout := p.Shards[0].Timeout
 	if timeout == 0 {
@@ -227,15 +228,9 @@ func (p *PostgreSQL) QueryLog(ctx context.Context, query interface{}) ([]interfa
 	if err := mapstructure.Decode(query, postgresqlQueryParam); err != nil {
 		return nil, 0, err
 	}
-	if postgresqlQueryParam.Database != "" {
-		p.Shards[0].DB = postgresqlQueryParam.Database
-	} else {
-		db, err := parseDBName(postgresqlQueryParam.SQL)
-		if err != nil {
-			return nil, 0, err
-		}
-		p.Shards[0].DB = db
-	}
+	origDB := p.Shards[0].DB
+	p.Shards[0].DB = resolveDatabase(origDB, p.Shards[0].Addr, postgresqlQueryParam)
+	defer func() { p.Shards[0].DB = origDB }()
 
 	postgresqlQueryParam.SQL = formatSQLDatabaseNameWithRegex(postgresqlQueryParam.SQL)
 	if strings.Contains(postgresqlQueryParam.SQL, "$__") {
@@ -283,9 +278,26 @@ func (p *PostgreSQL) DescribeTable(ctx context.Context, query interface{}) ([]*t
 	return p.Shards[0].DescTable(ctx, scheme, table)
 }
 
+func resolveDatabase(shardDB, addr string, qp *QueryParam) string {
+	if qp != nil && strings.TrimSpace(qp.Database) != "" {
+		return strings.TrimSpace(qp.Database)
+	}
+	if qp != nil {
+		if db, err := parseDBName(qp.SQL); err == nil && db != "" {
+			return db
+		}
+	}
+	if strings.TrimSpace(shardDB) != "" {
+		return strings.TrimSpace(shardDB)
+	}
+	if _, db := postgres.SplitHostDatabase(addr); db != "" {
+		return db
+	}
+	return "postgres"
+}
+
 func parseDBName(sql string) (db string, err error) {
-	re := regexp.MustCompile(regx)
-	matches := re.FindStringSubmatch(sql)
+	matches := fromThree.FindStringSubmatch(sql)
 	if len(matches) != 4 {
 		return "", fmt.Errorf("no valid table name in format database.schema.table found")
 	}

@@ -220,11 +220,33 @@ func (ds *Datasource) TableName() string {
 	return "datasource"
 }
 
+// NormalizeClusterName maps the FE sentinel "no_assigned_engine" (and empty)
+// onto the local engine cluster "default", so the alert scheduler actually
+// claims the datasource.
+func (ds *Datasource) NormalizeClusterName() {
+	if ds.ClusterName == "" || ds.ClusterName == "no_assigned_engine" {
+		ds.ClusterName = "default"
+	}
+	if ds.SettingsJson == nil {
+		return
+	}
+	for k, v := range ds.SettingsJson {
+		if !strings.Contains(k, "cluster_name") {
+			continue
+		}
+		s, _ := v.(string)
+		if s == "" || s == "no_assigned_engine" {
+			ds.SettingsJson[k] = "default"
+		}
+	}
+}
+
 func (ds *Datasource) Verify() error {
 	if str.Dangerous(ds.Name) {
 		return errors.New("Name has invalid characters")
 	}
 
+	ds.NormalizeClusterName()
 	err := ds.FE2DB()
 	return err
 }

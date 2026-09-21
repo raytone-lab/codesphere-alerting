@@ -85,62 +85,6 @@ func MergeOperationConf() error {
 const (
 	builtInOps = `
 ops:
-- name: Infrastructure
-  cname: Infrastructure
-  ops:
-    - name: /targets
-      cname: Host - View
-    - name: /targets/put
-      cname: Host - Modify
-    - name: /targets/del
-      cname: Host - Delete
-    - name: /targets/bind
-      cname: Host - Bind Uncategorized
-
-- name: Explorer
-  cname: Explorer
-  ops:
-    - name: /metric/explorer
-      cname: Metrics Explorer
-    - name: /object/explorer
-      cname: Quick View
-    - name: /metrics-built-in
-      cname: Built-in Metric - View
-    - name: /builtin-metrics/add
-      cname: Built-in Metric - Add
-    - name: /builtin-metrics/put
-      cname: Built-in Metric - Modify
-    - name: /builtin-metrics/del
-      cname: Built-in Metric - Delete
-    - name: /recording-rules
-      cname: Recording Rule - View
-    - name: /recording-rules/add
-      cname: Recording Rule - Add
-    - name: /recording-rules/put
-      cname: Recording Rule - Modify
-    - name: /recording-rules/del
-      cname: Recording Rule - Delete
-    - name: /log/explorer
-      cname: Logs Explorer
-    - name: /log/index-patterns # 前端有个管理索引模式的页面，所以需要一个权限点来控制，后面应该改成侧拉板
-      cname: Index Pattern - View
-    - name: /log/index-patterns/add
-      cname: Index Pattern - Add
-    - name: /log/index-patterns/put
-      cname: Index Pattern - Modify
-    - name: /log/index-patterns/del
-      cname: Index Pattern - Delete
-    - name: /dashboards
-      cname: Dashboard - View
-    - name: /dashboards/add
-      cname: Dashboard - Add
-    - name: /dashboards/put
-      cname: Dashboard - Modify
-    - name: /dashboards/del
-      cname: Dashboard - Delete
-    - name: /public-dashboards
-      cname: Dashboard - View Public
-
 - name: alerting
   cname: Alerting
   ops:
@@ -234,22 +178,18 @@ ops:
   ops:
     - name: /datasources # 用于控制能否看到数据源列表页面的菜单。只有 Admin 才能修改、删除数据源
       cname: Data Source - View
+    - name: /help/source # 兼容当前嵌入前端的数据源菜单 key
+      cname: Data Source - View (legacy menu)
     - name: /components
       cname: Component - View
+    - name: /built-in-components # 兼容当前嵌入前端的模板中心菜单 key
+      cname: Component - View (legacy menu)
     - name: /components/add
       cname: Component - Add
     - name: /components/put
       cname: Component - Modify
     - name: /components/del
       cname: Component - Delete
-    - name: /embedded-products
-      cname: Embedded Product - View
-    - name: /embedded-product/add
-      cname: Embedded Product - Add
-    - name: /embedded-product/put
-      cname: Embedded Product - Modify
-    - name: /embedded-product/delete
-      cname: Embedded Product - Delete
 
 - name: Organization
   cname: Organization
@@ -286,24 +226,32 @@ ops:
       cname: Role - Modify
     - name: /roles/del
       cname: Role - Delete
+    - name: /permissions # 兼容当前嵌入前端的权限管理菜单 key
+      cname: Role - View (legacy menu)
+    - name: /contacts # 兼容当前嵌入前端的联系方式菜单 key
+      cname: Contact - View
 
 - name: System Settings
   cname: System Settings
   ops:
     - name: /system/site-settings # 仅用于控制能否展示菜单，只有 Admin 才能修改、删除
       cname: View Site Settings
+    - name: /site-settings # 兼容当前嵌入前端的站点设置菜单 key
+      cname: View Site Settings (legacy menu)
     - name: /system/variable-settings
       cname: View Variable Settings
+    - name: /help/variable-configs # 兼容当前嵌入前端的变量配置菜单 key
+      cname: View Variable Settings (legacy menu)
     - name: /system/sso-settings
       cname: View SSO Settings
+    - name: /help/sso # 兼容当前嵌入前端的单点登录菜单 key
+      cname: View SSO Settings (legacy menu)
     - name: /system/alerting-engines
       cname: View Alerting Engines
-    - name: /system/version
-      cname: View Product Version
-    - name: /ai-config/llm-configs
-      cname: AI Config - LLM Configs
-    - name: /ai-config/skills
-      cname: AI Config - Skills
+    - name: /help/servers # 兼容当前嵌入前端的告警引擎菜单 key
+      cname: View Alerting Engines (legacy menu)
+    - name: /system/balance-alert
+      cname: Prepaid Balance Alert
 
 `
 )

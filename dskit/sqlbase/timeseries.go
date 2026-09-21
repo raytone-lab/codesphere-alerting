@@ -79,11 +79,11 @@ func FormatMetricValues(keys types.Keys, rows []map[string]interface{}, ignoreDe
 	}
 
 	keyMap := make(map[string]string)
-	for _, valueMetric := range strings.Split(keys.ValueKey, " ") {
+	for _, valueMetric := range strings.Fields(keys.ValueKey) {
 		keyMap[valueMetric] = "value"
 	}
 
-	for _, labelMetric := range strings.Split(keys.LabelKey, " ") {
+	for _, labelMetric := range strings.Fields(keys.LabelKey) {
 		keyMap[labelMetric] = "label"
 	}
 
@@ -94,6 +94,10 @@ func FormatMetricValues(keys types.Keys, rows []map[string]interface{}, ignoreDe
 		keyMap["time"] = "time"
 	} else {
 		keyMap[keys.TimeKey] = "time"
+	}
+
+	if strings.TrimSpace(keys.ValueKey) == "" {
+		inferNumericValueKeys(keyMap, rows)
 	}
 
 	var dataResps []types.MetricValues
@@ -193,6 +197,22 @@ func FormatMetricValues(keys types.Keys, rows []map[string]interface{}, ignoreDe
 	}
 
 	return dataResps
+}
+
+// inferNumericValueKeys treats parseable numeric columns as values when the
+// query did not set valueKey. PostgreSQL QueryTimeseries passes ignoreDefault
+// so those columns would otherwise produce zero series (and never fire alerts).
+func inferNumericValueKeys(keyMap map[string]string, rows []map[string]interface{}) {
+	for _, row := range rows {
+		for k, v := range row {
+			if keyMap[k] == "time" || keyMap[k] == "label" || keyMap[k] == "value" {
+				continue
+			}
+			if _, err := ParseFloat64Value(v); err == nil {
+				keyMap[k] = "value"
+			}
+		}
+	}
 }
 
 // ParseFloat64Value attempts to convert an interface{} to float64 using reflection

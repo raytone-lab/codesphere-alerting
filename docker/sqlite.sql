@@ -1863,3 +1863,32 @@ CREATE TABLE task_host_99
     `stderr` text,
     unique (`id`, `host`)
 );
+
+CREATE TABLE balance_alert_configs
+(
+    billing_account_id varchar(128) not null primary key,
+    enabled integer not null default 1,
+    current_state varchar(16) not null default 'NORMAL',
+    state_since datetime,
+    last_alert_at datetime,
+    created_at datetime not null,
+    updated_at datetime not null
+);
+
+CREATE TABLE balance_alert_records
+(
+    id varchar(64) not null primary key,
+    billing_account_id varchar(128) not null,
+    level varchar(16) not null,
+    balance_usd real not null,
+    threshold_usd real not null,
+    threshold_mode varchar(32) not null,
+    send_mode varchar(16) not null,
+    status varchar(32) not null,
+    channel varchar(16),
+    receiver varchar(255),
+    sent_at datetime,
+    operator_review varchar(32),
+    created_at datetime not null
+);
+CREATE INDEX idx_balance_alert_account_created ON balance_alert_records (billing_account_id, created_at);

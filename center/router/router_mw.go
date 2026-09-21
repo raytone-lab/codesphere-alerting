@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ccfos/nightingale/v6/aiagent/a2a"
 	"github.com/ccfos/nightingale/v6/center/cstats"
 	"github.com/ccfos/nightingale/v6/models"
 	"github.com/ccfos/nightingale/v6/pkg/ginx"
@@ -74,24 +73,8 @@ func (rt *Router) proxyAuth() gin.HandlerFunc {
 	}
 }
 
-// agentOAuthScopeKey 标记本请求命中 agent 面（/a2a /mcp）——只有带此标记时 tokenAuth
-// 才受理 OAuth access token（内建 AS 的 MCPAuth、外置 IdP 的 RSAuth）。这样一个为 agent
-// 端点签发的 OAuth token 不能被拿去调用其余 tokenAuth 保护的接口（/api/n9e/*）。由
-// agentOAuthScope() 写入，仅挂在 a2a/mcp 两个 group 上、排在 tokenAuth 之前。
-const agentOAuthScopeKey = "agent_oauth_scope"
-
-// agentOAuthScope 把请求标记为 agent 面调用，使后续的 tokenAuth 在本请求上接受 OAuth
-// access token。只在 a2a/mcp group 上、tokenAuth 之前安装；其它地方无此标记，OAuth
-// token 一律不受理，从而把它约束在签发它的 agent 端点内。
-func (rt *Router) agentOAuthScope() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Set(agentOAuthScopeKey, true)
-		c.Next()
-	}
-}
-
 // setAuthUser 把认证结果写入请求上下文。账号被禁用时在这里统一拒绝，
-// 于是 session、固定 token、OAuth token 几种入口都会立刻失效，不必等 token 过期。
+// 于是 session、固定 token 几种入口都会立刻失效，不必等 token 过期。
 // 这里直接读库而不是查用户缓存：缓存以 count(*) 与 max(update_at) 判断是否需要同步，
 // update_at 只有秒级精度，禁用若与上一次用户变更落在同一秒，两个统计值都不变，
 // 同步会被一直跳过，禁用迟迟不生效。取单列的主键查询，代价与 user() 里那次读库同级。
@@ -133,46 +116,6 @@ func (rt *Router) tokenAuth() gin.HandlerFunc {
 					c.Next()
 					return
 				}
-			}
-		}
-
-		// OAuth access token（内建 AS 与外置 IdP RS）只在 agent 面（/a2a /mcp）受理，
-		// 收敛权限：避免一个为 agent 签发的 token 被拿去调用其余 /api/n9e/* 接口。无标记
-		// 时整段跳过，token 落到下面的 session-JWT 校验并以 401 结束。
-		// /mcp 工具调用的进程内回放是唯一例外：请求 ctx 带 a2a 包私有的派发标记（外部
-		// 请求无法伪造），说明该 OAuth token 已在 /mcp 边界过过一次本中间件，内部这跳
-		// 视同 agent 面继续受理，RBAC 按解析出的用户正常生效。
-		agentScope := c.GetBool(agentOAuthScopeKey) || a2a.IsMCPInProcDispatch(c.Request.Context())
-
-		// 内建 OAuth 2.1 授权服务器（builtin AS）自签发的 access token：用本服务的 MCP
-		// 签名密钥验签（与外部 IdP token、session JWT 密码学隔离，验不过即非本类 token），
-		// 命中则按 token 内的用户放行。必须排在 RS 之前——builtin token 也带 iss，靠签名
-		// 甄别才不会被误送外部 IdP 验签。
-		if agentScope && rt.mcpAuthEnabled() {
-			if raw := rt.extractToken(c.Request); raw != "" {
-				if uid, uname, ok := rt.mcpVerifyAccessToken(raw); ok {
-					rt.setAuthUser(c, uid, uname)
-					c.Next()
-					return
-				}
-			}
-		}
-
-		// 外置 IdP 签发的 OAuth access token（Resource Server 模式）。OIDC 走 JWT
-		// 验签（凭 iss 与 n9e 自签 session JWT 区分）；OAuth2 走 introspection/userinfo
-		// （opaque token，经由不同请求头区分：n9e 固定 token 走 X-User-Token 头、已在
-		// 上面处理，extractToken 只读 Authorization: Bearer，故此处非 JWT 即外部 token）。
-		// 校验失败直接拒绝，避免被误当成 session JWT 二次验签。
-		if agentScope && rt.rsAuthEnabled() {
-			if raw := rt.extractToken(c.Request); raw != "" && rt.shouldVerifyAsRS(raw) {
-				user, err := rt.authByIdPAccessToken(c.Request.Context(), raw)
-				if err != nil {
-					logger.Debugf("[RS] verify access token failed: %v", err)
-					ginx.Bomb(http.StatusUnauthorized, "unauthorized")
-				}
-				rt.setAuthUser(c, user.Id, user.Username)
-				c.Next()
-				return
 			}
 		}
 

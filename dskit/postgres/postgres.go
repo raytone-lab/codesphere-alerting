@@ -72,13 +72,21 @@ func NewPostgreSQLWithSettings(ctx context.Context, settings interface{}) (*Post
 
 // NewConn establishes a new connection to PostgreSQL
 func (p *PostgreSQL) NewConn(ctx context.Context, database string) (*gorm.DB, error) {
-	if len(p.DB) == 0 && len(database) == 0 {
+	host, addrDB := SplitHostDatabase(p.Shard.Addr)
+	if host == "" {
+		return nil, errors.New("empty fe-node addr")
+	}
+	if database == "" {
+		database = strings.TrimSpace(p.DB)
+	}
+	if database == "" {
+		database = addrDB
+	}
+	if database == "" {
 		return nil, errors.New("empty pgsql database") // 兼容阿里实时数仓Holgres, 连接时必须指定db名字
 	}
-	if database != "" {
-		if err := sqlbase.ValidateIdentifier(database); err != nil {
-			return nil, fmt.Errorf("postgres connect: %w", err)
-		}
+	if err := sqlbase.ValidateIdentifier(database); err != nil {
+		return nil, fmt.Errorf("postgres connect: %w", err)
 	}
 
 	if p.Shard.Timeout == 0 {
@@ -97,17 +105,9 @@ func (p *PostgreSQL) NewConn(ctx context.Context, database string) (*gorm.DB, er
 		p.Shard.ConnMaxLifetime = 14400
 	}
 
-	if len(p.Shard.Addr) == 0 {
-		return nil, errors.New("empty fe-node addr")
-	}
 	var keys []string
 	var err error
-	keys = append(keys, p.Shard.Addr)
-
-	keys = append(keys, p.Shard.Password, p.Shard.User)
-	if len(database) > 0 {
-		keys = append(keys, database)
-	}
+	keys = append(keys, host, p.Shard.Password, p.Shard.User, database)
 	cachedKey := strings.Join(keys, ":")
 	// cache conn with database
 	conn, ok := pool.PoolClient.Load(cachedKey)
@@ -122,8 +122,7 @@ func (p *PostgreSQL) NewConn(ctx context.Context, database string) (*gorm.DB, er
 		}
 	}()
 
-	// Simplified connection logic for PostgreSQL
-	dsn := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable&TimeZone=Asia/Shanghai", url.QueryEscape(p.Shard.User), url.QueryEscape(p.Shard.Password), p.Shard.Addr, database)
+	dsn := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable&TimeZone=Asia/Shanghai", url.QueryEscape(p.Shard.User), url.QueryEscape(p.Shard.Password), host, database)
 
 	db, err = sqlbase.NewDB(
 		ctx,

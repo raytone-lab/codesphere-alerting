@@ -111,6 +111,27 @@ func TestFormatMetricValues(t *testing.T) {
 	}
 }
 
+func TestFormatMetricValuesEmptyValueKeyInfersNumeric(t *testing.T) {
+	rows := []map[string]interface{}{{"alert_count": int64(1)}}
+	got := FormatMetricValues(types.Keys{}, rows, true)
+	if len(got) != 1 {
+		t.Fatalf("series=%d want 1", len(got))
+	}
+	if string(got[0].Metric["__name__"]) != "alert_count" {
+		t.Fatalf("name=%v", got[0].Metric["__name__"])
+	}
+	if len(got[0].Values) == 0 || got[0].Values[0][1] != 1 {
+		t.Fatalf("values=%v", got[0].Values)
+	}
+}
+
+func TestFormatMetricValuesEmptyValueKeyNoRows(t *testing.T) {
+	got := FormatMetricValues(types.Keys{}, nil, true)
+	if len(got) != 0 {
+		t.Fatalf("series=%d want 0", len(got))
+	}
+}
+
 func TestParseFloat64Value(t *testing.T) {
 
 	ptr := func(val float64) *float64 {

@@ -108,3 +108,33 @@ func TestTextTemplateRenderingRemainsRawForAppProviders(t *testing.T) {
 		t.Fatalf("text template render changed:\nwant %q\ngot  %q", want, got)
 	}
 }
+
+func TestWebhookErrCodeError(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{name: "dingtalk success", body: `{"errcode":0,"errmsg":"ok"}`},
+		{name: "string zero", body: `{"errcode":"0","errmsg":"ok"}`},
+		{name: "empty", body: ``},
+		{name: "plain ok", body: `ok`},
+		{name: "callback json without errcode", body: `{"status":"ok","code":200}`},
+		{name: "token missing", body: `{"errcode":300005,"errmsg":"token is not exist"}`, wantErr: "webhook id is not exist"},
+		{name: "keyword missing", body: `{"errcode":310000,"errmsg":"keywords not in content"}`, wantErr: "keywords not in content"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := webhookErrCodeError([]byte(c.body))
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Fatalf("error = %v, want containing %q", err, c.wantErr)
+			}
+		})
+	}
+}

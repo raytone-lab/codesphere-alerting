@@ -645,6 +645,7 @@ var NotiChMap = []*NotifyChannelConfig{
 			Custom: Params{
 				Params: []ParamItem{
 					{Key: "access_token", CName: "Access Token", Type: "string"},
+					{Key: "secret", CName: "Sign Secret", Type: "string"},
 					{Key: "bot_name", CName: "Bot Name", Type: "string"},
 				},
 			},

@@ -512,7 +512,6 @@ func isPhoneEncrypted(phone string) bool {
 }
 
 type xUserTokenReq struct {
-	RawToken string `json:"raw_token"`
 	Username string `json:"username"`
 }
 
@@ -520,56 +519,15 @@ func (rt *Router) getXUserToken(c *gin.Context) {
 	var f xUserTokenReq
 	ginx.BindJSON(c, &f)
 
-	var user *models.User
 	username := f.Username
-	if f.RawToken != "" {
-		// 验证过的身份是唯一可信来源，覆盖调用方传入的 username。两类 OAuth access
-		// token 都受理（与 tokenAuth 中间件同序）：先试 n9e 内建 AS（MCPAuth）自签发
-		// 的 token，再回退外置 IdP（RSAuth）。两者皆未开启则该接口不可用。
-		if !rt.mcpAuthEnabled() && !rt.rsAuthEnabled() {
-			ginx.Bomb(http.StatusServiceUnavailable, "oauth is not enabled")
-		}
-
-		var verifiedName string
-
-		// 内建 AS：用本服务的 MCP 签名密钥验签（与外部 IdP token、session JWT 密码学
-		// 隔离，验不过即非本类 token），命中则取 token 内的用户。内建 AS 的 token 必然
-		// 对应一个已存在的 n9e 用户，故这里只解析用户名，存在性交由后续统一校验。
-		if rt.mcpAuthEnabled() {
-			if _, uname, ok := rt.mcpVerifyAccessToken(f.RawToken); ok {
-				verifiedName = uname
-			}
-		}
-
-		// 外置 IdP 签发的 OAuth access token（Resource Server 模式）：首次见到的用户
-		// 按 SSO 默认值自动建号，返回的 user 非空可省去后续按名查库。
-		if verifiedName == "" && rt.rsAuthEnabled() {
-			u, err := rt.authByIdPAccessToken(c.Request.Context(), f.RawToken)
-			if err != nil {
-				logger.Debugf("[RS] verify access token failed: %v", err)
-				ginx.Bomb(http.StatusUnauthorized, "unauthorized")
-			}
-			verifiedName = u.Username
-			user = u
-		}
-
-		if verifiedName == "" {
-			ginx.Bomb(http.StatusUnauthorized, "unauthorized")
-		}
-		username = verifiedName
-	}
-
 	if username == "" {
-		ginx.Bomb(http.StatusBadRequest, "raw_token or username required")
+		ginx.Bomb(http.StatusBadRequest, "username required")
 	}
 
+	user, err := models.UserGetByUsername(rt.Ctx, username)
+	ginx.Dangerous(err)
 	if user == nil {
-		var err error
-		user, err = models.UserGetByUsername(rt.Ctx, username)
-		ginx.Dangerous(err)
-		if user == nil {
-			ginx.Bomb(http.StatusNotFound, "user not found")
-		}
+		ginx.Bomb(http.StatusNotFound, "user not found")
 	}
 
 	userTokens, err := models.GetTokensByUsername(rt.Ctx, username)

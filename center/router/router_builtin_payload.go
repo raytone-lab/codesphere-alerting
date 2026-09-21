@@ -1,0 +1,339 @@
+package router
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/BurntSushi/toml"
+	"github.com/ccfos/nightingale/v6/center/integration"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ginx"
+	"github.com/gin-gonic/gin"
+	"gopkg.in/yaml.v2"
+)
+
+// verifyCollectContent 校验采集模板内容。绝大多数 categraf 采集插件配置是 TOML，
+// 因此先按 TOML 解析；失败再尝试 YAML（prometheus-agent 等外挂配置为 YAML）。
+// 两者都无法解析时返回 TOML 的报错——历史模板默认是 TOML，沿用 TOML 错误更贴近用户预期。
+// 这里的宽松程度与 n9e-plus 采集配置的校验保持一致，避免模板能存、
+// 由模板生成的采集配置却存不下。
+func verifyCollectContent(content string) error {
+	var tomlMap map[string]interface{}
+	tomlErr := toml.Unmarshal([]byte(content), &tomlMap)
+	if tomlErr == nil {
+		return nil
+	}
+
+	var yamlMap map[string]interface{}
+	if yamlErr := yaml.Unmarshal([]byte(content), &yamlMap); yamlErr == nil && len(yamlMap) > 0 {
+		return nil
+	}
+
+	return tomlErr
+}
+
+type Board struct {
+	Name    string      `json:"name"`
+	Tags    string      `json:"tags"`
+	Configs interface{} `json:"configs"`
+	UUID    int64       `json:"uuid"`
+	Note    string      `json:"note"`
+}
+
+func (rt *Router) builtinPayloadsAdd(c *gin.Context) {
+	var lst []models.BuiltinPayload
+	ginx.BindJSON(c, &lst)
+
+	username := Username(c)
+
+	count := len(lst)
+	if count == 0 {
+		ginx.Bomb(http.StatusBadRequest, "input json is empty")
+	}
+
+	reterr := make(map[string]string)
+	for i := 0; i < count; i++ {
+		if lst[i].Type == "alert" {
+			if strings.HasPrefix(strings.TrimSpace(lst[i].Content), "[") {
+				// 处理多个告警规则模板的情况
+				alertRules := []models.AlertRule{}
+				if err := json.Unmarshal([]byte(lst[i].Content), &alertRules); err != nil {
+					reterr[lst[i].Name] = err.Error()
+				}
+
+				for _, rule := range alertRules {
+					if rule.UUID == 0 {
+						rule.UUID = time.Now().UnixMicro()
+					}
+
+					contentBytes, err := json.Marshal(rule)
+					if err != nil {
+						reterr[rule.Name] = err.Error()
+						continue
+					}
+
+					bp := models.BuiltinPayload{
+						Type:        lst[i].Type,
+						ComponentID: lst[i].ComponentID,
+						Cate:        lst[i].Cate,
+						Name:        rule.Name,
+						Tags:        rule.AppendTags,
+						UUID:        rule.UUID,
+						Content:     string(contentBytes),
+						CreatedBy:   username,
+						UpdatedBy:   username,
+					}
+
+					if err := bp.Add(rt.Ctx, username); err != nil {
+						reterr[bp.Name] = translateText(c.GetHeader("X-Language"), err.Error())
+					}
+				}
+				continue
+			}
+
+			alertRule := models.AlertRule{}
+			if err := json.Unmarshal([]byte(lst[i].Content), &alertRule); err != nil {
+				reterr[lst[i].Name] = err.Error()
+				continue
+			}
+
+			if alertRule.UUID == 0 {
+				alertRule.UUID = time.Now().UnixMicro()
+			}
+
+			contentBytes, err := json.Marshal(alertRule)
+			if err != nil {
+				reterr[alertRule.Name] = err.Error()
+				continue
+			}
+
+			bp := models.BuiltinPayload{
+				Type:        lst[i].Type,
+				ComponentID: lst[i].ComponentID,
+				Cate:        lst[i].Cate,
+				Name:        alertRule.Name,
+				Tags:        alertRule.AppendTags,
+				UUID:        alertRule.UUID,
+				Content:     string(contentBytes),
+				CreatedBy:   username,
+				UpdatedBy:   username,
+			}
+
+			if err := bp.Add(rt.Ctx, username); err != nil {
+				reterr[bp.Name] = translateText(c.GetHeader("X-Language"), err.Error())
+			}
+		} else if lst[i].Type == "dashboard" {
+			if strings.HasPrefix(strings.TrimSpace(lst[i].Content), "[") {
+				// 处理多个告警规则模板的情况
+				dashboards := []Board{}
+				if err := json.Unmarshal([]byte(lst[i].Content), &dashboards); err != nil {
+					reterr[lst[i].Name] = err.Error()
+				}
+
+				for _, dashboard := range dashboards {
+					if dashboard.UUID == 0 {
+						dashboard.UUID = time.Now().UnixMicro()
+					}
+
+					contentBytes, err := json.Marshal(dashboard)
+					if err != nil {
+						reterr[dashboard.Name] = err.Error()
+						continue
+					}
+
+					bp := models.BuiltinPayload{
+						Type:        lst[i].Type,
+						ComponentID: lst[i].ComponentID,
+						Cate:        lst[i].Cate,
+						Name:        dashboard.Name,
+						Tags:        dashboard.Tags,
+						UUID:        dashboard.UUID,
+						Note:        dashboard.Note,
+						Content:     string(contentBytes),
+						CreatedBy:   username,
+						UpdatedBy:   username,
+					}
+
+					if err := bp.Add(rt.Ctx, username); err != nil {
+						reterr[bp.Name] = translateText(c.GetHeader("X-Language"), err.Error())
+					}
+				}
+				continue
+			}
+
+			dashboard := Board{}
+			if err := json.Unmarshal([]byte(lst[i].Content), &dashboard); err != nil {
+				reterr[lst[i].Name] = translateText(c.GetHeader("X-Language"), err.Error())
+				continue
+			}
+
+			if dashboard.UUID == 0 {
+				dashboard.UUID = time.Now().UnixMicro()
+			}
+
+			contentBytes, err := json.Marshal(dashboard)
+			if err != nil {
+				reterr[dashboard.Name] = err.Error()
+				continue
+			}
+
+			bp := models.BuiltinPayload{
+				Type:        lst[i].Type,
+				ComponentID: lst[i].ComponentID,
+				Cate:        lst[i].Cate,
+				Name:        dashboard.Name,
+				Tags:        dashboard.Tags,
+				UUID:        dashboard.UUID,
+				Note:        dashboard.Note,
+				Content:     string(contentBytes),
+				CreatedBy:   username,
+				UpdatedBy:   username,
+			}
+
+			if err := bp.Add(rt.Ctx, username); err != nil {
+				reterr[bp.Name] = translateText(c.GetHeader("X-Language"), err.Error())
+			}
+		} else {
+			if lst[i].Type == "collect" {
+				if err := verifyCollectContent(lst[i].Content); err != nil {
+					reterr[lst[i].Name] = err.Error()
+					continue
+				}
+			}
+
+			if err := lst[i].Add(rt.Ctx, username); err != nil {
+				reterr[lst[i].Name] = translateText(c.GetHeader("X-Language"), err.Error())
+			}
+		}
+
+	}
+
+	ginx.NewRender(c).Data(reterr, nil)
+}
+
+func (rt *Router) builtinPayloadsGets(c *gin.Context) {
+	typ := ginx.QueryStr(c, "type", "")
+	if typ == "" {
+		ginx.Bomb(http.StatusBadRequest, "type is required")
+		return
+	}
+	ComponentID := ginx.QueryInt64(c, "component_id", 0)
+
+	cate := ginx.QueryStr(c, "cate", "")
+	query := ginx.QueryStr(c, "query", "")
+
+	// DB 里的用户自建模板不做语言处理（用户内容语言无关），仅内置模板按请求语言渲染
+	lst, err := models.BuiltinPayloadGets(rt.Ctx, uint64(ComponentID), typ, cate, query)
+	ginx.Dangerous(err)
+
+	lang := integration.NormalizeLang(c.GetHeader("X-Language"))
+	lstInFile, err := integration.BuiltinPayloadInFile.GetBuiltinPayload(typ, cate, query, uint64(ComponentID), lang)
+	ginx.Dangerous(err)
+
+	if len(lstInFile) > 0 {
+		lst = append(lst, lstInFile...)
+	}
+
+	ginx.NewRender(c).Data(lst, nil)
+}
+
+func (rt *Router) builtinPayloadcatesGet(c *gin.Context) {
+	typ := ginx.QueryStr(c, "type", "")
+	ComponentID := ginx.QueryInt64(c, "component_id", 0)
+
+	cates, err := models.BuiltinPayloadCates(rt.Ctx, typ, uint64(ComponentID))
+	ginx.Dangerous(err)
+
+	lang := integration.NormalizeLang(c.GetHeader("X-Language"))
+	catesInFile, err := integration.BuiltinPayloadInFile.GetBuiltinPayloadCates(typ, uint64(ComponentID), lang)
+	ginx.Dangerous(err)
+
+	// 使用 map 进行去重
+	cateMap := make(map[string]bool)
+
+	// 添加数据库中的分类
+	for _, cate := range cates {
+		cateMap[cate] = true
+	}
+
+	// 添加文件中的分类
+	for _, cate := range catesInFile {
+		cateMap[cate] = true
+	}
+
+	// 将去重后的结果转换回切片
+	result := make([]string, 0, len(cateMap))
+	for cate := range cateMap {
+		result = append(result, cate)
+	}
+
+	ginx.NewRender(c).Data(result, nil)
+}
+
+func (rt *Router) builtinPayloadsPut(c *gin.Context) {
+	var req models.BuiltinPayload
+	ginx.BindJSON(c, &req)
+
+	bp, err := models.BuiltinPayloadGet(rt.Ctx, "id = ?", req.ID)
+	ginx.Dangerous(err)
+
+	if bp == nil {
+		ginx.NewRender(c, http.StatusNotFound).Message("No such builtin payload")
+		return
+	}
+
+	if req.Type == "alert" {
+		alertRule := models.AlertRule{}
+		if err := json.Unmarshal([]byte(req.Content), &alertRule); err != nil {
+			bombErr(http.StatusBadRequest, err)
+		}
+
+		req.Name = alertRule.Name
+		req.Tags = alertRule.AppendTags
+	} else if req.Type == "dashboard" {
+		dashboard := Board{}
+		if err := json.Unmarshal([]byte(req.Content), &dashboard); err != nil {
+			bombErr(http.StatusBadRequest, err)
+		}
+
+		req.Name = dashboard.Name
+		req.Tags = dashboard.Tags
+		req.Note = dashboard.Note
+	} else if req.Type == "collect" {
+		if err := verifyCollectContent(req.Content); err != nil {
+			bombErr(http.StatusBadRequest, err)
+		}
+	}
+
+	username := Username(c)
+	req.UpdatedBy = username
+
+	ginx.NewRender(c).Message(bp.Update(rt.Ctx, req))
+}
+
+func (rt *Router) builtinPayloadsDel(c *gin.Context) {
+	var req idsForm
+	ginx.BindJSON(c, &req)
+
+	req.Verify()
+
+	ginx.NewRender(c).Message(models.BuiltinPayloadDels(rt.Ctx, req.Ids))
+}
+
+func (rt *Router) builtinPayloadsGetByUUID(c *gin.Context) {
+	uuid := ginx.QueryInt64(c, "uuid")
+
+	// 优先查内存中的文件数据，与列表接口保持一致（按请求语言取变体）
+	lang := integration.NormalizeLang(c.GetHeader("X-Language"))
+	if bp := integration.BuiltinPayloadInFile.GetByUUID(uuid, lang); bp != nil {
+		ginx.NewRender(c).Data(bp, nil)
+		return
+	}
+
+	bp, err := models.BuiltinPayloadGet(rt.Ctx, "uuid = ?", uuid)
+	ginx.Dangerous(err)
+
+	ginx.NewRender(c).Data(bp, nil)
+}

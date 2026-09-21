@@ -1,0 +1,172 @@
+package flashduty
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"time"
+
+	"github.com/ccfos/nightingale/v6/center/cconf"
+
+	"github.com/toolkits/pkg/logger"
+)
+
+var (
+	Api     string
+	Headers map[string]string
+	Timeout time.Duration
+)
+
+func Init(fdConf cconf.FlashDuty) {
+	Api = fdConf.Api
+	Headers = make(map[string]string)
+	Headers = fdConf.Headers
+
+	if fdConf.Timeout == 0 {
+		Timeout = 5 * time.Second
+	} else {
+		Timeout = fdConf.Timeout * time.Millisecond
+	}
+}
+
+type dutyResp[T any] struct {
+	RequestId string `json:"request_id"`
+	Data      T      `json:"data"`
+	Error     struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+type TeamInfo struct {
+	TeamID        int64   `json:"team_id"`
+	TeamName      string  `json:"team_name"`
+	Description   string  `json:"description"`
+	CreatedAt     int64   `json:"created_at"`
+	UpdatedAt     int64   `json:"updated_at"`
+	UpdatedBy     int64   `json:"updated_by"`
+	UpdatedByName string  `json:"updated_by_name"`
+	CreatorID     int64   `json:"creator_id"`
+	RefID         string  `json:"ref_id"`
+	PersonIDs     []int64 `json:"person_ids"`
+}
+
+type Data struct {
+	P     int    `json:"p"`
+	Limit int    `json:"limit"`
+	Total int    `json:"total"`
+	Items []Item `json:"items"`
+}
+
+type Item struct {
+	MemberID      int    `json:"member_id"`
+	MemberName    string `json:"member_name"`
+	Phone         string `json:"phone"`
+	Email         string `json:"email"`
+	EmailVerified string `json:"email_verified"`
+	RefID         string `json:"ref_id"`
+}
+
+func PostFlashDuty(path string, appKey string, body interface{}) error {
+	_, err := PostFlashDutyWithResp[Data](path, appKey, body)
+	return err
+}
+
+func PostFlashDutyWithResp[T any](path string, appKey string, body interface{}) (T, error) {
+	urlParams := url.Values{}
+	urlParams.Add("app_key", appKey)
+	var url string
+	if Api != "" {
+		url = fmt.Sprintf("%s%s?%s", Api, path, urlParams.Encode())
+	} else {
+		url = fmt.Sprintf("%s%s?%s", "https://api.flashcat.cloud", path, urlParams.Encode())
+	}
+	response, code, err := PostJSON(url, Timeout, Headers, body)
+	req, _ := json.Marshal(body)
+	logger.Infof("flashduty post: url=%s, req=%s; response=%s, code=%d", url, string(req), string(response), code)
+
+	var resp dutyResp[T]
+	if err == nil {
+		e := json.Unmarshal(response, &resp)
+		if e == nil && resp.Error.Message != "" {
+			err = fmt.Errorf("flashduty post error: %s", resp.Error.Message)
+		}
+	}
+
+	return resp.Data, err
+}
+
+func PostJSON(url string, timeout time.Duration, headers map[string]string, v interface{}, retries ...int) (response []byte, code int, err error) {
+	var bs []byte
+
+	bs, err = json.Marshal(v)
+	if err != nil {
+		return
+	}
+
+	client := http.Client{
+		Timeout: timeout,
+	}
+
+	newRequest := func() (*http.Request, error) {
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(bs))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		return req, nil
+	}
+
+	var resp *http.Response
+
+	if len(retries) > 0 {
+		for i := 0; i < retries[0]; i++ {
+			var req *http.Request
+			req, err = newRequest()
+			if err != nil {
+				return
+			}
+
+			resp, err = client.Do(req)
+			if err == nil {
+				break
+			}
+
+			tryagain := ""
+			if i+1 < retries[0] {
+				tryagain = " try again"
+			}
+
+			logger.Warningf("failed to curl %s error: %s"+tryagain, url, err)
+
+			if i+1 < retries[0] {
+				time.Sleep(time.Millisecond * 200)
+			}
+		}
+	} else {
+		var req *http.Request
+		req, err = newRequest()
+		if err != nil {
+			return
+		}
+		resp, err = client.Do(req)
+	}
+
+	if err != nil {
+		return
+	}
+
+	code = resp.StatusCode
+
+	if resp.Body != nil {
+		defer resp.Body.Close()
+		response, err = io.ReadAll(resp.Body)
+	}
+
+	return
+}

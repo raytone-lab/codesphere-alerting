@@ -1,0 +1,656 @@
+package router
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/ccfos/nightingale/v6/aiagent/a2a"
+	"github.com/ccfos/nightingale/v6/center/cstats"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ginx"
+
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt"
+	"github.com/google/uuid"
+	"github.com/toolkits/pkg/logger"
+)
+
+const (
+	DefaultTokenKey = "X-User-Token"
+)
+
+type AccessDetails struct {
+	AccessUuid   string
+	UserIdentity string
+}
+
+func (rt *Router) handleProxyUser(c *gin.Context) *models.User {
+	headerUserNameKey := rt.HTTP.ProxyAuth.HeaderUserNameKey
+	username := c.GetHeader(headerUserNameKey)
+	if username == "" {
+		ginx.Bomb(http.StatusUnauthorized, "unauthorized")
+	}
+
+	user, err := models.UserGetByUsername(rt.Ctx, username)
+	if err != nil {
+		bombErr(http.StatusInternalServerError, err)
+	}
+
+	if user == nil {
+		now := time.Now().Unix()
+		user = &models.User{
+			Username: username,
+			Nickname: username,
+			Roles:    strings.Join(rt.HTTP.ProxyAuth.DefaultRoles, " "),
+			CreateAt: now,
+			UpdateAt: now,
+			CreateBy: "system",
+			UpdateBy: "system",
+		}
+		err = user.Add(rt.Ctx)
+		if err != nil {
+			bombErr(http.StatusInternalServerError, err)
+		}
+	}
+
+	if user.IsDisabled() {
+		ginx.Bomb(http.StatusUnauthorized, models.ErrUserDisabled)
+	}
+
+	return user
+}
+
+func (rt *Router) proxyAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user := rt.handleProxyUser(c)
+		c.Set("userid", user.Id)
+		c.Set("username", user.Username)
+		c.Next()
+	}
+}
+
+// agentOAuthScopeKey 标记本请求命中 agent 面（/a2a /mcp）——只有带此标记时 tokenAuth
+// 才受理 OAuth access token（内建 AS 的 MCPAuth、外置 IdP 的 RSAuth）。这样一个为 agent
+// 端点签发的 OAuth token 不能被拿去调用其余 tokenAuth 保护的接口（/api/n9e/*）。由
+// agentOAuthScope() 写入，仅挂在 a2a/mcp 两个 group 上、排在 tokenAuth 之前。
+const agentOAuthScopeKey = "agent_oauth_scope"
+
+// agentOAuthScope 把请求标记为 agent 面调用，使后续的 tokenAuth 在本请求上接受 OAuth
+// access token。只在 a2a/mcp group 上、tokenAuth 之前安装；其它地方无此标记，OAuth
+// token 一律不受理，从而把它约束在签发它的 agent 端点内。
+func (rt *Router) agentOAuthScope() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Set(agentOAuthScopeKey, true)
+		c.Next()
+	}
+}
+
+// setAuthUser 把认证结果写入请求上下文。账号被禁用时在这里统一拒绝，
+// 于是 session、固定 token、OAuth token 几种入口都会立刻失效，不必等 token 过期。
+// 这里直接读库而不是查用户缓存：缓存以 count(*) 与 max(update_at) 判断是否需要同步，
+// update_at 只有秒级精度，禁用若与上一次用户变更落在同一秒，两个统计值都不变，
+// 同步会被一直跳过，禁用迟迟不生效。取单列的主键查询，代价与 user() 里那次读库同级。
+func (rt *Router) setAuthUser(c *gin.Context, userid int64, username string) {
+	exists, disabled, err := models.UserStatusById(rt.Ctx, userid)
+	if err != nil {
+		logger.Warningf("failed to check user(id=%d) status: %v", userid, err)
+		ginx.Bomb(http.StatusUnauthorized, "unauthorized")
+	}
+
+	// 账号已删除但 token 还没过期：不能放行，否则重建的同名账号会被旧凭证接管
+	if !exists {
+		ginx.Bomb(http.StatusUnauthorized, "unauthorized")
+	}
+
+	if disabled {
+		ginx.Bomb(http.StatusUnauthorized, models.ErrUserDisabled)
+	}
+
+	c.Set("userid", userid)
+	c.Set("username", username)
+}
+
+// tokenAuth 支持两种方式的认证，固定 token 和 jwt token
+// 因为不太好区分用户使用哪个方式，所以两种方式放在一个中间件里
+func (rt *Router) tokenAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 先验证固定 token
+		if rt.HTTP.TokenAuth.Enable {
+			tokenKey := rt.HTTP.TokenAuth.HeaderUserTokenKey
+			if tokenKey == "" {
+				tokenKey = DefaultTokenKey
+			}
+			token := c.GetHeader(tokenKey)
+			if token != "" {
+				user := rt.UserTokenCache.GetByToken(token)
+				if user != nil && user.Username != "" {
+					rt.setAuthUser(c, user.Id, user.Username)
+					c.Next()
+					return
+				}
+			}
+		}
+
+		// OAuth access token（内建 AS 与外置 IdP RS）只在 agent 面（/a2a /mcp）受理，
+		// 收敛权限：避免一个为 agent 签发的 token 被拿去调用其余 /api/n9e/* 接口。无标记
+		// 时整段跳过，token 落到下面的 session-JWT 校验并以 401 结束。
+		// /mcp 工具调用的进程内回放是唯一例外：请求 ctx 带 a2a 包私有的派发标记（外部
+		// 请求无法伪造），说明该 OAuth token 已在 /mcp 边界过过一次本中间件，内部这跳
+		// 视同 agent 面继续受理，RBAC 按解析出的用户正常生效。
+		agentScope := c.GetBool(agentOAuthScopeKey) || a2a.IsMCPInProcDispatch(c.Request.Context())
+
+		// 内建 OAuth 2.1 授权服务器（builtin AS）自签发的 access token：用本服务的 MCP
+		// 签名密钥验签（与外部 IdP token、session JWT 密码学隔离，验不过即非本类 token），
+		// 命中则按 token 内的用户放行。必须排在 RS 之前——builtin token 也带 iss，靠签名
+		// 甄别才不会被误送外部 IdP 验签。
+		if agentScope && rt.mcpAuthEnabled() {
+			if raw := rt.extractToken(c.Request); raw != "" {
+				if uid, uname, ok := rt.mcpVerifyAccessToken(raw); ok {
+					rt.setAuthUser(c, uid, uname)
+					c.Next()
+					return
+				}
+			}
+		}
+
+		// 外置 IdP 签发的 OAuth access token（Resource Server 模式）。OIDC 走 JWT
+		// 验签（凭 iss 与 n9e 自签 session JWT 区分）；OAuth2 走 introspection/userinfo
+		// （opaque token，经由不同请求头区分：n9e 固定 token 走 X-User-Token 头、已在
+		// 上面处理，extractToken 只读 Authorization: Bearer，故此处非 JWT 即外部 token）。
+		// 校验失败直接拒绝，避免被误当成 session JWT 二次验签。
+		if agentScope && rt.rsAuthEnabled() {
+			if raw := rt.extractToken(c.Request); raw != "" && rt.shouldVerifyAsRS(raw) {
+				user, err := rt.authByIdPAccessToken(c.Request.Context(), raw)
+				if err != nil {
+					logger.Debugf("[RS] verify access token failed: %v", err)
+					ginx.Bomb(http.StatusUnauthorized, "unauthorized")
+				}
+				rt.setAuthUser(c, user.Id, user.Username)
+				c.Next()
+				return
+			}
+		}
+
+		// 再验证 jwt token
+		metadata, err := rt.extractTokenMetadata(c.Request)
+		if err != nil {
+			ginx.Bomb(http.StatusUnauthorized, "unauthorized")
+		}
+
+		userIdentity, err := rt.fetchAuth(c.Request.Context(), metadata.AccessUuid)
+		if err != nil {
+			ginx.Bomb(http.StatusUnauthorized, "unauthorized")
+		}
+
+		// ${userid}-${username}
+		arr := strings.SplitN(userIdentity, "-", 2)
+		if len(arr) != 2 {
+			ginx.Bomb(http.StatusUnauthorized, "unauthorized")
+		}
+
+		userid, err := strconv.ParseInt(arr[0], 10, 64)
+		if err != nil {
+			ginx.Bomb(http.StatusUnauthorized, "unauthorized")
+		}
+
+		rt.setAuthUser(c, userid, arr[1])
+
+		c.Next()
+	}
+}
+
+func (rt *Router) Auth() gin.HandlerFunc {
+	return rt.auth()
+}
+
+func (rt *Router) auth() gin.HandlerFunc {
+	if rt.HTTP.ProxyAuth.Enable {
+		return rt.proxyAuth()
+	} else {
+		return rt.tokenAuth()
+	}
+}
+
+// if proxy auth is enabled, mock jwt login/logout/refresh request
+func (rt *Router) jwtMock() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !rt.HTTP.ProxyAuth.Enable {
+			c.Next()
+			return
+		}
+		if strings.Contains(c.FullPath(), "logout") {
+			ginx.Bomb(http.StatusBadRequest, "logout is not supported when proxy auth is enabled")
+		}
+		user := rt.handleProxyUser(c)
+		ginx.NewRender(c).Data(gin.H{
+			"user":          user,
+			"access_token":  "",
+			"refresh_token": "",
+		}, nil)
+		c.Abort()
+	}
+}
+
+func (rt *Router) User() gin.HandlerFunc {
+	return rt.user()
+}
+
+func (rt *Router) user() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		username := c.MustGet("username").(string)
+
+		user, err := models.UserGetByUsername(rt.Ctx, username)
+		if err != nil {
+			ginx.Bomb(http.StatusUnauthorized, "unauthorized")
+		}
+
+		if user == nil {
+			ginx.Bomb(http.StatusUnauthorized, "unauthorized")
+		}
+
+		c.Set("user", user)
+		c.Set("isadmin", user.IsAdmin())
+		// Update user.LastActiveTime
+		rt.UserCache.SetLastActiveTime(user.Id, time.Now().Unix())
+		c.Next()
+	}
+}
+
+func (rt *Router) userGroupWrite() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		me := c.MustGet("user").(*models.User)
+		ug := UserGroup(rt.Ctx, ginx.UrlParamInt64(c, "id"))
+
+		can, err := me.CanModifyUserGroup(rt.Ctx, ug)
+		ginx.Dangerous(err)
+
+		if !can {
+			ginx.Bomb(http.StatusForbidden, "forbidden")
+		}
+
+		c.Set("user_group", ug)
+		c.Next()
+	}
+}
+
+func (rt *Router) bgro() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		me := c.MustGet("user").(*models.User)
+		bg := BusiGroup(rt.Ctx, ginx.UrlParamInt64(c, "id"))
+
+		can, err := me.CanDoBusiGroup(rt.Ctx, bg)
+		ginx.Dangerous(err)
+
+		if !can {
+			ginx.Bomb(http.StatusForbidden, "forbidden")
+		}
+
+		c.Set("busi_group", bg)
+		c.Next()
+	}
+}
+
+// bgrw 逐步要被干掉，不安全
+func (rt *Router) Bgrw() gin.HandlerFunc {
+	return rt.bgrw()
+}
+
+func (rt *Router) bgrw() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		me := c.MustGet("user").(*models.User)
+		bg := BusiGroup(rt.Ctx, ginx.UrlParamInt64(c, "id"))
+
+		can, err := me.CanDoBusiGroup(rt.Ctx, bg, "rw")
+		ginx.Dangerous(err)
+
+		if !can {
+			ginx.Bomb(http.StatusForbidden, "forbidden")
+		}
+
+		c.Set("busi_group", bg)
+		c.Next()
+	}
+}
+
+// bgrwCheck 要逐渐替换掉bgrw方法，更安全
+func (rt *Router) bgrwCheck(c *gin.Context, bgid int64) {
+	me := c.MustGet("user").(*models.User)
+	bg := BusiGroup(rt.Ctx, bgid)
+
+	can, err := me.CanDoBusiGroup(rt.Ctx, bg, "rw")
+	ginx.Dangerous(err)
+
+	if !can {
+		ginx.Bomb(http.StatusForbidden, "forbidden")
+	}
+
+	c.Set("busi_group", bg)
+}
+
+func (rt *Router) bgrwChecks(c *gin.Context, bgids []int64) {
+	set := make(map[int64]struct{})
+
+	for i := 0; i < len(bgids); i++ {
+		if _, has := set[bgids[i]]; has {
+			continue
+		}
+
+		rt.bgrwCheck(c, bgids[i])
+		set[bgids[i]] = struct{}{}
+	}
+}
+
+func (rt *Router) bgroCheck(c *gin.Context, bgid int64) {
+	me := c.MustGet("user").(*models.User)
+	bg := BusiGroup(rt.Ctx, bgid)
+
+	can, err := me.CanDoBusiGroup(rt.Ctx, bg)
+	ginx.Dangerous(err)
+
+	if !can {
+		ginx.Bomb(http.StatusForbidden, "forbidden")
+	}
+
+	c.Set("busi_group", bg)
+}
+
+// bgroCheckAllowMissing is bgroCheck for objects that outlive their busi group.
+// Deleting a busi group only clears alert_cur_event (models.BusiGroup.Del), so
+// alert_his_event rows keep pointing at a group that is gone; bgroCheck answers
+// those with 404 "No such BusiGroup" - even for an admin, because BusiGroup()
+// bombs before CanDoBusiGroup reaches its IsAdmin shortcut, and the caller
+// cannot tell that 404 apart from "no such event". Here a missing group is a
+// permission question instead: admins still get through, everyone else gets a
+// plain 403. A bgid of 0 lands in the same branch for the same reason.
+func (rt *Router) bgroCheckAllowMissing(c *gin.Context, bgid int64) {
+	me := c.MustGet("user").(*models.User)
+
+	bg, err := models.BusiGroupGetById(rt.Ctx, bgid)
+	ginx.Dangerous(err)
+
+	if bg == nil {
+		if !me.IsAdmin() {
+			ginx.Bomb(http.StatusForbidden, "forbidden")
+		}
+		return
+	}
+
+	can, err := me.CanDoBusiGroup(rt.Ctx, bg)
+	ginx.Dangerous(err)
+
+	if !can {
+		ginx.Bomb(http.StatusForbidden, "forbidden")
+	}
+
+	c.Set("busi_group", bg)
+}
+
+func (rt *Router) Perm(operation string) gin.HandlerFunc {
+	return rt.perm(operation)
+}
+
+func (rt *Router) perm(operation string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		me := c.MustGet("user").(*models.User)
+
+		can, err := me.CheckPerm(rt.Ctx, operation)
+		ginx.Dangerous(err)
+
+		if !can {
+			ginx.Bomb(http.StatusForbidden, "forbidden")
+		}
+
+		c.Next()
+	}
+}
+
+func (rt *Router) admin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userid := c.MustGet("userid").(int64)
+
+		user, err := models.UserGetById(rt.Ctx, userid)
+		if err != nil {
+			ginx.Bomb(http.StatusUnauthorized, "unauthorized")
+		}
+
+		if user == nil {
+			ginx.Bomb(http.StatusUnauthorized, "unauthorized")
+		}
+
+		roles := strings.Fields(user.Roles)
+		found := false
+		for i := 0; i < len(roles); i++ {
+			if roles[i] == models.AdminRole {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			ginx.Bomb(http.StatusForbidden, "forbidden")
+		}
+
+		c.Set("user", user)
+		c.Next()
+	}
+}
+
+func (rt *Router) extractTokenMetadata(r *http.Request) (*AccessDetails, error) {
+	token, err := rt.verifyToken(rt.HTTP.JWTAuth.SigningKey, rt.extractToken(r))
+	if err != nil {
+		return nil, err
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if ok && token.Valid {
+		accessUuid, ok := claims["access_uuid"].(string)
+		if !ok {
+			return nil, errors.New("failed to parse access_uuid from jwt")
+		}
+
+		// accessUuid 在 redis 里存在才放行
+		val, err := rt.fetchAuth(r.Context(), accessUuid)
+		if err != nil || val == "" {
+			return nil, errors.New("unauthorized")
+		}
+
+		return &AccessDetails{
+			AccessUuid:   accessUuid,
+			UserIdentity: claims["user_identity"].(string),
+		}, nil
+	}
+
+	return nil, err
+}
+
+func (rt *Router) extractToken(r *http.Request) string {
+	tok := r.Header.Get("Authorization")
+
+	if len(tok) > 6 && strings.ToUpper(tok[0:7]) == "BEARER " {
+		return tok[7:]
+	}
+
+	return ""
+}
+
+func (rt *Router) createAuth(ctx context.Context, userIdentity string, td *TokenDetails) error {
+	username := strings.Split(userIdentity, "-")[1]
+
+	// 如果只能有一个账号登录，那么就删除之前的 token
+	if rt.HTTP.JWTAuth.SingleLogin {
+		delKeys, err := rt.Redis.SMembers(ctx, rt.wrapJwtKey(username)).Result()
+		if err != nil {
+			return err
+		}
+
+		if len(delKeys) > 0 {
+			errDel := rt.Redis.Del(ctx, delKeys...).Err()
+			if errDel != nil {
+				return errDel
+			}
+		}
+
+		if errDel := rt.Redis.Del(ctx, rt.wrapJwtKey(username)).Err(); errDel != nil {
+			return errDel
+		}
+	}
+
+	at := time.Unix(td.AtExpires, 0)
+	rte := time.Unix(td.RtExpires, 0)
+	now := time.Now()
+
+	if err := rt.Redis.Set(ctx, rt.wrapJwtKey(td.AccessUuid), userIdentity, at.Sub(now)).Err(); err != nil {
+		cstats.RedisOperationLatency.WithLabelValues("set_token", "fail").Observe(time.Since(now).Seconds())
+		return err
+	}
+
+	if err := rt.Redis.Set(ctx, rt.wrapJwtKey(td.RefreshUuid), userIdentity, rte.Sub(now)).Err(); err != nil {
+		cstats.RedisOperationLatency.WithLabelValues("set_token", "fail").Observe(time.Since(now).Seconds())
+		return err
+	}
+
+	cstats.RedisOperationLatency.WithLabelValues("set_token", "success").Observe(time.Since(now).Seconds())
+
+	if rt.HTTP.JWTAuth.SingleLogin {
+		if err := rt.Redis.SAdd(ctx, rt.wrapJwtKey(username), rt.wrapJwtKey(td.AccessUuid), rt.wrapJwtKey(td.RefreshUuid)).Err(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (rt *Router) fetchAuth(ctx context.Context, givenUuid string) (string, error) {
+	now := time.Now()
+	ret, err := rt.Redis.Get(ctx, rt.wrapJwtKey(givenUuid)).Result()
+	if err != nil {
+		cstats.RedisOperationLatency.WithLabelValues("get_token", "fail").Observe(time.Since(now).Seconds())
+	} else {
+		cstats.RedisOperationLatency.WithLabelValues("get_token", "success").Observe(time.Since(now).Seconds())
+	}
+
+	return ret, err
+}
+
+func (rt *Router) deleteAuth(ctx context.Context, givenUuid string) error {
+	err := rt.Redis.Del(ctx, rt.wrapJwtKey(givenUuid)).Err()
+	if err != nil {
+		cstats.RedisOperationLatency.WithLabelValues("del_token", "fail").Observe(time.Since(time.Now()).Seconds())
+	} else {
+		cstats.RedisOperationLatency.WithLabelValues("del_token", "success").Observe(time.Since(time.Now()).Seconds())
+	}
+	return err
+}
+
+func (rt *Router) deleteTokens(ctx context.Context, authD *AccessDetails) error {
+	// get the refresh uuid
+	refreshUuid := authD.AccessUuid + "++" + authD.UserIdentity
+
+	// delete access token
+	err := rt.Redis.Del(ctx, rt.wrapJwtKey(authD.AccessUuid)).Err()
+	if err != nil {
+		return err
+	}
+
+	// delete refresh token
+	err = rt.Redis.Del(ctx, rt.wrapJwtKey(refreshUuid)).Err()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (rt *Router) wrapJwtKey(key string) string {
+	return rt.HTTP.JWTAuth.RedisKeyPrefix + key
+}
+
+func (rt *Router) wrapIdTokenKey(userId int64) string {
+	return fmt.Sprintf("n9e_id_token_%d", userId)
+}
+
+// saveIdToken 保存用户的 id_token 到 Redis
+func (rt *Router) saveIdToken(ctx context.Context, userId int64, idToken string) error {
+	if idToken == "" {
+		return nil
+	}
+	// id_token 的过期时间应该与 RefreshToken 保持一致，确保在整个会话期间都可用于登出
+	expiration := time.Minute * time.Duration(rt.HTTP.JWTAuth.RefreshExpired)
+	return rt.Redis.Set(ctx, rt.wrapIdTokenKey(userId), idToken, expiration).Err()
+}
+
+// fetchIdToken 从 Redis 获取用户的 id_token
+func (rt *Router) fetchIdToken(ctx context.Context, userId int64) (string, error) {
+	return rt.Redis.Get(ctx, rt.wrapIdTokenKey(userId)).Result()
+}
+
+// deleteIdToken 从 Redis 删除用户的 id_token
+func (rt *Router) deleteIdToken(ctx context.Context, userId int64) error {
+	return rt.Redis.Del(ctx, rt.wrapIdTokenKey(userId)).Err()
+}
+
+type TokenDetails struct {
+	AccessToken  string
+	RefreshToken string
+	AccessUuid   string
+	RefreshUuid  string
+	AtExpires    int64
+	RtExpires    int64
+}
+
+func (rt *Router) createTokens(signingKey, userIdentity string) (*TokenDetails, error) {
+	td := &TokenDetails{}
+	td.AtExpires = time.Now().Add(time.Minute * time.Duration(rt.HTTP.JWTAuth.AccessExpired)).Unix()
+	td.AccessUuid = uuid.NewString()
+
+	td.RtExpires = time.Now().Add(time.Minute * time.Duration(rt.HTTP.JWTAuth.RefreshExpired)).Unix()
+	td.RefreshUuid = td.AccessUuid + "++" + userIdentity
+
+	var err error
+	// Creating Access Token
+	atClaims := jwt.MapClaims{}
+	atClaims["authorized"] = true
+	atClaims["access_uuid"] = td.AccessUuid
+	atClaims["user_identity"] = userIdentity
+	atClaims["exp"] = td.AtExpires
+	at := jwt.NewWithClaims(jwt.SigningMethodHS256, atClaims)
+	td.AccessToken, err = at.SignedString([]byte(signingKey))
+	if err != nil {
+		return nil, err
+	}
+
+	// Creating Refresh Token
+	rtClaims := jwt.MapClaims{}
+	rtClaims["refresh_uuid"] = td.RefreshUuid
+	rtClaims["user_identity"] = userIdentity
+	rtClaims["exp"] = td.RtExpires
+	jrt := jwt.NewWithClaims(jwt.SigningMethodHS256, rtClaims)
+	td.RefreshToken, err = jrt.SignedString([]byte(signingKey))
+	if err != nil {
+		return nil, err
+	}
+
+	return td, nil
+}
+
+func (rt *Router) verifyToken(signingKey, tokenString string) (*jwt.Token, error) {
+	if tokenString == "" {
+		return nil, fmt.Errorf("bearer token not found")
+	}
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected jwt signing method: %v", token.Header["alg"])
+		}
+		return []byte(signingKey), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return token, nil
+}

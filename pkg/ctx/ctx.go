@@ -1,0 +1,67 @@
+package ctx
+
+import (
+	"context"
+
+	"github.com/ccfos/nightingale/v6/conf"
+
+	"gorm.io/gorm"
+)
+
+type Context struct {
+	DB        *gorm.DB
+	CenterApi conf.CenterApi
+	Ctx       context.Context
+	IsCenter  bool
+}
+
+func NewContext(ctx context.Context, db *gorm.DB, isCenter bool, centerApis ...conf.CenterApi) *Context {
+	var api conf.CenterApi
+	if len(centerApis) > 0 {
+		api = centerApis[0]
+	}
+
+	return &Context{
+		Ctx:       ctx,
+		DB:        db,
+		CenterApi: api,
+		IsCenter:  isCenter,
+	}
+}
+
+// set db to Context
+func (c *Context) SetDB(db *gorm.DB) {
+	c.DB = db
+}
+
+// get context from Context
+func (c *Context) GetContext() context.Context {
+	return c.Ctx
+}
+
+// get db from Context
+func (c *Context) GetDB() *gorm.DB {
+	return c.DB
+}
+
+// WithContext returns a shallow copy with a different standard context.
+// Useful for carrying per-request values (e.g. traceId) without mutating the global instance.
+func (c *Context) WithContext(stdCtx context.Context) *Context {
+	return &Context{
+		DB:        c.DB,
+		CenterApi: c.CenterApi,
+		Ctx:       stdCtx,
+		IsCenter:  c.IsCenter,
+	}
+}
+
+// WithCenterApiTimeout returns a shallow copy whose per-request timeout to the
+// center (milliseconds) is overridden. CenterApi.Timeout is shared by every
+// poster call, so it is sized for the slowest of them (target queries); call
+// sites on a latency-sensitive path use this to tighten their own deadline
+// without touching the config.
+func (c *Context) WithCenterApiTimeout(timeoutMs int64) *Context {
+	cp := *c
+	cp.CenterApi.Timeout = timeoutMs
+	return &cp
+}

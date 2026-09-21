@@ -1,0 +1,769 @@
+[
+    {
+        "id": 0,
+        "group_id": 0,
+        "cate": "prometheus",
+        "datasource_ids": [
+            0
+        ],
+        "cluster": "",
+        "name": "vm error logging rate 大于0",
+        "note": "",
+        "prod": "metric",
+        "algorithm": "",
+        "algo_params": null,
+        "delay": 0,
+        "severity": 2,
+        "severities": [
+            2
+        ],
+        "disabled": 1,
+        "prom_for_duration": 60,
+        "prom_ql": "",
+        "rule_config": {
+            "algo_params": null,
+            "inhibit": false,
+            "prom_ql": "",
+            "queries": [
+                {
+                    "prom_ql": "sum by (job, level) (rate(vm_log_messages_total{level!=\"info\"}[5m])) \u003e 0",
+                    "severity": 2
+                }
+            ],
+            "severity": 0
+        },
+        "prom_eval_interval": 15,
+        "enable_stime": "00:00",
+        "enable_stimes": [
+            "00:00"
+        ],
+        "enable_etime": "23:59",
+        "enable_etimes": [
+            "23:59"
+        ],
+        "enable_days_of_week": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "0"
+        ],
+        "enable_days_of_weeks": [
+            [
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "0"
+            ]
+        ],
+        "enable_in_bg": 0,
+        "notify_recovered": 1,
+        "notify_channels": [
+            "dingtalk"
+        ],
+        "notify_groups_obj": null,
+        "notify_groups": null,
+        "notify_repeat_step": 60,
+        "notify_max_number": 0,
+        "recover_duration": 0,
+        "callbacks": [
+            "https://api.flashcat.cloud/event/push/alert/n9e?integration_key=f1258018f5595ba7bf30572f2f44c1ac973"
+        ],
+        "runbook_url": "",
+        "append_tags": [],
+        "annotations": {
+            "action": "1) 到对应实例查看日志（journalctl -u victoria-metrics 或容器日志），按 level 过滤看具体报错；\n2) 常见为写入端数据格式错误、标签基数过高被拒、磁盘空间不足；\n3) 基数问题用 /api/v1/status/tsdb 看 topN 的高基数指标并在写入端治理；\n4) 磁盘问题按磁盘空间告警处理。"
+        },
+        "extra_config": null,
+        "create_at": 0,
+        "create_by": "",
+        "update_at": 0,
+        "update_by": "",
+        "uuid": 1717556328440334000
+    },
+    {
+        "id": 0,
+        "group_id": 0,
+        "cate": "prometheus",
+        "datasource_ids": [
+            0
+        ],
+        "cluster": "",
+        "name": "vm-insert 和 vm-storage 组件之间连接的饱和度大于9",
+        "note": "",
+        "prod": "metric",
+        "algorithm": "",
+        "algo_params": null,
+        "delay": 0,
+        "severity": 2,
+        "severities": [
+            2
+        ],
+        "disabled": 1,
+        "prom_for_duration": 60,
+        "prom_ql": "",
+        "rule_config": {
+            "algo_params": null,
+            "inhibit": false,
+            "prom_ql": "",
+            "queries": [
+                {
+                    "prom_ql": "max(rate(vm_rpc_send_duration_seconds_total{job_name=~\".+\"}[5m])) by(addr) / 1000 \u003e 9",
+                    "severity": 2
+                }
+            ],
+            "severity": 0
+        },
+        "prom_eval_interval": 15,
+        "enable_stime": "00:00",
+        "enable_stimes": [
+            "00:00"
+        ],
+        "enable_etime": "23:59",
+        "enable_etimes": [
+            "23:59"
+        ],
+        "enable_days_of_week": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "0"
+        ],
+        "enable_days_of_weeks": [
+            [
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "0"
+            ]
+        ],
+        "enable_in_bg": 0,
+        "notify_recovered": 1,
+        "notify_channels": [
+            "dingtalk"
+        ],
+        "notify_groups_obj": null,
+        "notify_groups": null,
+        "notify_repeat_step": 60,
+        "notify_max_number": 0,
+        "recover_duration": 0,
+        "callbacks": [
+            "https://api.flashcat.cloud/event/push/alert/n9e?integration_key=f1258018f5595ba7bf30572f2f44c1ac973"
+        ],
+        "runbook_url": "",
+        "append_tags": [],
+        "annotations": {
+            "action": "1) 看 vm-storage 侧的 CPU、磁盘 IO 与 vm_slow_row_inserts_total，确认瓶颈在计算还是磁盘；\n2) 用 /api/v1/status/tsdb 看是否有高基数指标导致写入放大；\n3) 短期可减少写入并发或对高基数指标做 relabel 丢弃；\n4) 长期需扩容 vm-storage 节点或换更快的磁盘。"
+        },
+        "extra_config": null,
+        "create_at": 0,
+        "create_by": "",
+        "update_at": 0,
+        "update_by": "",
+        "uuid": 1717556328440822000
+    },
+    {
+        "id": 0,
+        "group_id": 0,
+        "cate": "prometheus",
+        "datasource_ids": [
+            0
+        ],
+        "cluster": "",
+        "name": "vm-insert 实例端口异常",
+        "note": "",
+        "prod": "metric",
+        "algorithm": "",
+        "algo_params": null,
+        "delay": 0,
+        "severity": 1,
+        "severities": [
+            1
+        ],
+        "disabled": 1,
+        "prom_for_duration": 120,
+        "prom_ql": "",
+        "rule_config": {
+            "algo_params": null,
+            "inhibit": false,
+            "prom_ql": "",
+            "queries": [
+                {
+                    "prom_ql": "net_response_result_code{service=\"vm-insert\"}!=0",
+                    "severity": 1
+                }
+            ],
+            "severity": 0
+        },
+        "prom_eval_interval": 15,
+        "enable_stime": "00:00",
+        "enable_stimes": [
+            "00:00"
+        ],
+        "enable_etime": "23:59",
+        "enable_etimes": [
+            "23:59"
+        ],
+        "enable_days_of_week": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "0"
+        ],
+        "enable_days_of_weeks": [
+            [
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "0"
+            ]
+        ],
+        "enable_in_bg": 0,
+        "notify_recovered": 1,
+        "notify_channels": [
+            "dingtalk"
+        ],
+        "notify_groups_obj": null,
+        "notify_groups": null,
+        "notify_repeat_step": 60,
+        "notify_max_number": 0,
+        "recover_duration": 120,
+        "callbacks": [],
+        "runbook_url": "",
+        "append_tags": [],
+        "annotations": {
+            "action": "1) 从告警标签取实例地址，在采集机上手工 nc -vz \u003c地址\u003e \u003c端口\u003e 复现；\n2) 到该机器确认对应进程是否存活、日志有无 panic 或 OOM；\n3) 进程存活但端口不通的排查防火墙与监听地址配置；\n4) 集群模式下确认剩余节点数是否仍满足读写要求，不足时优先恢复节点而非重启整个集群。"
+        },
+        "extra_config": null,
+        "create_at": 0,
+        "create_by": "",
+        "update_at": 0,
+        "update_by": "",
+        "uuid": 1717556328441356000
+    },
+    {
+        "id": 0,
+        "group_id": 0,
+        "cate": "prometheus",
+        "datasource_ids": [
+            0
+        ],
+        "cluster": "",
+        "name": "vm-select 实例端口异常",
+        "note": "",
+        "prod": "metric",
+        "algorithm": "",
+        "algo_params": null,
+        "delay": 0,
+        "severity": 1,
+        "severities": [
+            1
+        ],
+        "disabled": 1,
+        "prom_for_duration": 60,
+        "prom_ql": "",
+        "rule_config": {
+            "algo_params": null,
+            "inhibit": false,
+            "prom_ql": "",
+            "queries": [
+                {
+                    "prom_ql": "net_response_result_code{service=\"vm-select\"}!=0",
+                    "severity": 1
+                }
+            ],
+            "severity": 0
+        },
+        "prom_eval_interval": 15,
+        "enable_stime": "00:00",
+        "enable_stimes": [
+            "00:00"
+        ],
+        "enable_etime": "23:59",
+        "enable_etimes": [
+            "23:59"
+        ],
+        "enable_days_of_week": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "0"
+        ],
+        "enable_days_of_weeks": [
+            [
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "0"
+            ]
+        ],
+        "enable_in_bg": 0,
+        "notify_recovered": 1,
+        "notify_channels": [
+            "dingtalk"
+        ],
+        "notify_groups_obj": null,
+        "notify_groups": null,
+        "notify_repeat_step": 60,
+        "notify_max_number": 0,
+        "recover_duration": 0,
+        "callbacks": [
+            "https://api.flashcat.cloud/event/push/alert/n9e?integration_key=f1258018f5595ba7bf30572f2f44c1ac973"
+        ],
+        "runbook_url": "",
+        "append_tags": [],
+        "annotations": {
+            "action": "1) 从告警标签取实例地址，在采集机上手工 nc -vz \u003c地址\u003e \u003c端口\u003e 复现；\n2) 到该机器确认对应进程是否存活、日志有无 panic 或 OOM；\n3) 进程存活但端口不通的排查防火墙与监听地址配置；\n4) 集群模式下确认剩余节点数是否仍满足读写要求，不足时优先恢复节点而非重启整个集群。"
+        },
+        "extra_config": null,
+        "create_at": 0,
+        "create_by": "",
+        "update_at": 0,
+        "update_by": "",
+        "uuid": 1717556328441809000
+    },
+    {
+        "id": 0,
+        "group_id": 0,
+        "cate": "prometheus",
+        "datasource_ids": [
+            0
+        ],
+        "cluster": "",
+        "name": "vm-select请求查询延迟超过15s",
+        "note": "",
+        "prod": "metric",
+        "algorithm": "",
+        "algo_params": null,
+        "delay": 0,
+        "severity": 2,
+        "severities": [
+            2
+        ],
+        "disabled": 1,
+        "prom_for_duration": 60,
+        "prom_ql": "",
+        "rule_config": {
+            "algo_params": null,
+            "inhibit": false,
+            "prom_ql": "",
+            "queries": [
+                {
+                    "prom_ql": "max(vm_request_duration_seconds{job_name=~\".+\"}) by (path) \u003e 15",
+                    "severity": 2
+                }
+            ],
+            "severity": 0
+        },
+        "prom_eval_interval": 15,
+        "enable_stime": "00:00",
+        "enable_stimes": [
+            "00:00"
+        ],
+        "enable_etime": "23:59",
+        "enable_etimes": [
+            "23:59"
+        ],
+        "enable_days_of_week": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "0"
+        ],
+        "enable_days_of_weeks": [
+            [
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "0"
+            ]
+        ],
+        "enable_in_bg": 0,
+        "notify_recovered": 1,
+        "notify_channels": [
+            "dingtalk"
+        ],
+        "notify_groups_obj": null,
+        "notify_groups": null,
+        "notify_repeat_step": 60,
+        "notify_max_number": 0,
+        "recover_duration": 0,
+        "callbacks": [
+            "https://api.flashcat.cloud/event/push/alert/n9e?integration_key=f1258018f5595ba7bf30572f2f44c1ac973"
+        ],
+        "runbook_url": "",
+        "append_tags": [],
+        "annotations": {
+            "action": "1) 从告警标签取 path 定位是哪类查询慢；\n2) 用 /api/v1/status/top_queries 找出最慢与最频繁的查询；\n3) 常见根因是查询时间跨度过大或高基数标签——在仪表盘上收窄时间范围、减少 group by 维度；\n4) 存储侧确认磁盘 IO 与 CPU 是否打满，必要时扩容 vm-select/vm-storage。"
+        },
+        "extra_config": null,
+        "create_at": 0,
+        "create_by": "",
+        "update_at": 0,
+        "update_by": "",
+        "uuid": 1717556328442240000
+    },
+    {
+        "id": 0,
+        "group_id": 0,
+        "cate": "prometheus",
+        "datasource_ids": [
+            0
+        ],
+        "cluster": "",
+        "name": "vm-storage 实例端口异常",
+        "note": "",
+        "prod": "metric",
+        "algorithm": "",
+        "algo_params": null,
+        "delay": 0,
+        "severity": 1,
+        "severities": [
+            1
+        ],
+        "disabled": 1,
+        "prom_for_duration": 120,
+        "prom_ql": "",
+        "rule_config": {
+            "algo_params": null,
+            "inhibit": false,
+            "prom_ql": "",
+            "queries": [
+                {
+                    "prom_ql": "net_response_result_code{service=\"vm-storage\"} != 0",
+                    "severity": 1
+                }
+            ],
+            "severity": 0
+        },
+        "prom_eval_interval": 15,
+        "enable_stime": "00:00",
+        "enable_stimes": [
+            "00:00"
+        ],
+        "enable_etime": "23:59",
+        "enable_etimes": [
+            "23:59"
+        ],
+        "enable_days_of_week": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "0"
+        ],
+        "enable_days_of_weeks": [
+            [
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "0"
+            ]
+        ],
+        "enable_in_bg": 0,
+        "notify_recovered": 1,
+        "notify_channels": [
+            "dingtalk"
+        ],
+        "notify_groups_obj": null,
+        "notify_groups": null,
+        "notify_repeat_step": 60,
+        "notify_max_number": 0,
+        "recover_duration": 120,
+        "callbacks": [],
+        "runbook_url": "",
+        "append_tags": [],
+        "annotations": {
+            "action": "1) 从告警标签取实例地址，在采集机上手工 nc -vz \u003c地址\u003e \u003c端口\u003e 复现；\n2) 到该机器确认对应进程是否存活、日志有无 panic 或 OOM；\n3) 进程存活但端口不通的排查防火墙与监听地址配置；\n4) 集群模式下确认剩余节点数是否仍满足读写要求，不足时优先恢复节点而非重启整个集群。"
+        },
+        "extra_config": null,
+        "create_at": 0,
+        "create_by": "",
+        "update_at": 0,
+        "update_by": "",
+        "uuid": 1717556328442679000
+    },
+    {
+        "id": 0,
+        "group_id": 0,
+        "cate": "prometheus",
+        "datasource_ids": [
+            0
+        ],
+        "cluster": "",
+        "name": "vminsert服务宕机",
+        "note": "",
+        "prod": "metric",
+        "algorithm": "",
+        "algo_params": null,
+        "delay": 0,
+        "severity": 2,
+        "severities": [
+            2
+        ],
+        "disabled": 1,
+        "prom_for_duration": 60,
+        "prom_ql": "",
+        "rule_config": {
+            "algo_params": null,
+            "inhibit": false,
+            "prom_ql": "",
+            "queries": [
+                {
+                    "prom_ql": "up{service=~\"vminsert.+\"} \u003c 1",
+                    "severity": 2
+                }
+            ],
+            "severity": 0
+        },
+        "prom_eval_interval": 60,
+        "enable_stime": "00:00",
+        "enable_stimes": [
+            "00:00"
+        ],
+        "enable_etime": "23:59",
+        "enable_etimes": [
+            "23:59"
+        ],
+        "enable_days_of_week": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "0"
+        ],
+        "enable_days_of_weeks": [
+            [
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "0"
+            ]
+        ],
+        "enable_in_bg": 0,
+        "notify_recovered": 1,
+        "notify_channels": [],
+        "notify_groups_obj": null,
+        "notify_groups": null,
+        "notify_repeat_step": 60,
+        "notify_max_number": 0,
+        "recover_duration": 0,
+        "callbacks": [],
+        "runbook_url": "",
+        "append_tags": [],
+        "annotations": {
+            "action": "1) 从告警标签取实例地址，在采集机上手工 nc -vz \u003c地址\u003e \u003c端口\u003e 复现；\n2) 到该机器确认对应进程是否存活、日志有无 panic 或 OOM；\n3) 进程存活但端口不通的排查防火墙与监听地址配置；\n4) 集群模式下确认剩余节点数是否仍满足读写要求，不足时优先恢复节点而非重启整个集群。"
+        },
+        "extra_config": null,
+        "create_at": 0,
+        "create_by": "",
+        "update_at": 0,
+        "update_by": "",
+        "uuid": 1717556328443166000
+    },
+    {
+        "id": 0,
+        "group_id": 0,
+        "cate": "prometheus",
+        "datasource_ids": [
+            0
+        ],
+        "cluster": "",
+        "name": "vmselect服务宕机",
+        "note": "",
+        "prod": "metric",
+        "algorithm": "",
+        "algo_params": null,
+        "delay": 0,
+        "severity": 2,
+        "severities": [
+            2
+        ],
+        "disabled": 1,
+        "prom_for_duration": 60,
+        "prom_ql": "",
+        "rule_config": {
+            "algo_params": null,
+            "inhibit": false,
+            "prom_ql": "",
+            "queries": [
+                {
+                    "prom_ql": "up{service=~\"vmselect.+\"} \u003c 1",
+                    "severity": 2
+                }
+            ],
+            "severity": 0
+        },
+        "prom_eval_interval": 60,
+        "enable_stime": "00:00",
+        "enable_stimes": [
+            "00:00"
+        ],
+        "enable_etime": "23:59",
+        "enable_etimes": [
+            "23:59"
+        ],
+        "enable_days_of_week": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "0"
+        ],
+        "enable_days_of_weeks": [
+            [
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "0"
+            ]
+        ],
+        "enable_in_bg": 0,
+        "notify_recovered": 1,
+        "notify_channels": [],
+        "notify_groups_obj": null,
+        "notify_groups": null,
+        "notify_repeat_step": 60,
+        "notify_max_number": 0,
+        "recover_duration": 0,
+        "callbacks": [],
+        "runbook_url": "",
+        "append_tags": [],
+        "annotations": {
+            "action": "1) 从告警标签取实例地址，在采集机上手工 nc -vz \u003c地址\u003e \u003c端口\u003e 复现；\n2) 到该机器确认对应进程是否存活、日志有无 panic 或 OOM；\n3) 进程存活但端口不通的排查防火墙与监听地址配置；\n4) 集群模式下确认剩余节点数是否仍满足读写要求，不足时优先恢复节点而非重启整个集群。"
+        },
+        "extra_config": null,
+        "create_at": 0,
+        "create_by": "",
+        "update_at": 0,
+        "update_by": "",
+        "uuid": 1717556328443676000
+    },
+    {
+        "id": 0,
+        "group_id": 0,
+        "cate": "prometheus",
+        "datasource_ids": [
+            0
+        ],
+        "cluster": "",
+        "name": "vmstorage服务宕机",
+        "note": "",
+        "prod": "metric",
+        "algorithm": "",
+        "algo_params": null,
+        "delay": 0,
+        "severity": 2,
+        "severities": [
+            2
+        ],
+        "disabled": 1,
+        "prom_for_duration": 60,
+        "prom_ql": "",
+        "rule_config": {
+            "algo_params": null,
+            "inhibit": false,
+            "prom_ql": "",
+            "queries": [
+                {
+                    "prom_ql": "up{service=~\"vmstorage.+\"} \u003c 1",
+                    "severity": 2
+                }
+            ],
+            "severity": 0
+        },
+        "prom_eval_interval": 60,
+        "enable_stime": "00:00",
+        "enable_stimes": [
+            "00:00"
+        ],
+        "enable_etime": "23:59",
+        "enable_etimes": [
+            "23:59"
+        ],
+        "enable_days_of_week": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "0"
+        ],
+        "enable_days_of_weeks": [
+            [
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "0"
+            ]
+        ],
+        "enable_in_bg": 0,
+        "notify_recovered": 1,
+        "notify_channels": [],
+        "notify_groups_obj": null,
+        "notify_groups": null,
+        "notify_repeat_step": 60,
+        "notify_max_number": 0,
+        "recover_duration": 0,
+        "callbacks": [],
+        "runbook_url": "",
+        "append_tags": [],
+        "annotations": {
+            "action": "1) 从告警标签取实例地址，在采集机上手工 nc -vz \u003c地址\u003e \u003c端口\u003e 复现；\n2) 到该机器确认对应进程是否存活、日志有无 panic 或 OOM；\n3) 进程存活但端口不通的排查防火墙与监听地址配置；\n4) 集群模式下确认剩余节点数是否仍满足读写要求，不足时优先恢复节点而非重启整个集群。"
+        },
+        "extra_config": null,
+        "create_at": 0,
+        "create_by": "",
+        "update_at": 0,
+        "update_by": "",
+        "uuid": 1717556328444251000
+    }
+]

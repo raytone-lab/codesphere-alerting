@@ -1,0 +1,400 @@
+{
+    "name": "机器台账表格视图（使用 Categraf 作为采集器）",
+    "tags": "Categraf",
+    "ident": "",
+    "uuid": 1717556327742611000,
+    "configs": {
+        "links": [
+            {
+                "targetBlank": true,
+                "title": "n9e",
+                "url": "https://n9e.github.io/"
+            },
+            {
+                "targetBlank": true,
+                "title": "author",
+                "url": "http://flashcat.cloud/"
+            }
+        ],
+        "panels": [
+            {
+                "type": "hexbin",
+                "id": "21b8b3ab-26aa-47cb-b814-f310f2d143aa",
+                "layout": {
+                    "h": 5,
+                    "i": "21b8b3ab-26aa-47cb-b814-f310f2d143aa",
+                    "isResizable": true,
+                    "w": 12,
+                    "x": 0,
+                    "y": 0
+                },
+                "version": "3.1.0",
+                "datasourceCate": "prometheus",
+                "datasourceValue": "${prom}",
+                "targets": [
+                    {
+                        "expr": "topk(100, cpu_usage_active{cpu=\"cpu-total\", ident=~\"$ident\"})",
+                        "instant": true,
+                        "legend": "{{ident}}",
+                        "maxDataPoints": 480,
+                        "refId": "A",
+                        "step": 15
+                    }
+                ],
+                "transformations": [
+                    {
+                        "id": "organize",
+                        "options": {}
+                    }
+                ],
+                "name": "CPU利用率",
+                "maxPerRow": 4,
+                "custom": {
+                    "textMode": "valueAndName",
+                    "calc": "lastNotNull",
+                    "valueField": "Value",
+                    "colorRange": [
+                        "thresholds"
+                    ],
+                    "detailUrl": "/components/dashboard/detail?__uuid__=1737103014612000&ident=${__field.labels.ident}"
+                },
+                "options": {
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "#ef3c3c",
+                                "value": 95,
+                                "type": ""
+                            },
+                            {
+                                "color": "#ff656b",
+                                "type": "",
+                                "value": 85
+                            },
+                            {
+                                "color": "#ffae39",
+                                "type": "",
+                                "value": 75
+                            },
+                            {
+                                "color": "#2c9d3d",
+                                "type": "base",
+                                "value": null
+                            }
+                        ]
+                    },
+                    "standardOptions": {
+                        "util": "percent",
+                        "decimals": 2
+                    }
+                }
+            },
+            {
+                "type": "hexbin",
+                "id": "86d4a502-21f7-4981-9b38-ed8e696b6f49",
+                "layout": {
+                    "h": 5,
+                    "i": "872b2040-c5b0-43fe-92c7-e37cb77edffc",
+                    "isResizable": true,
+                    "w": 12,
+                    "x": 12,
+                    "y": 0
+                },
+                "version": "3.1.0",
+                "datasourceCate": "prometheus",
+                "datasourceValue": "${prom}",
+                "targets": [
+                    {
+                        "expr": "topk(100, mem_used_percent{ident=~\"$ident\"})",
+                        "instant": true,
+                        "legend": "{{ident}}",
+                        "maxDataPoints": 480,
+                        "refId": "A",
+                        "step": 15
+                    }
+                ],
+                "transformations": [
+                    {
+                        "id": "organize",
+                        "options": {}
+                    }
+                ],
+                "name": "内存利用率",
+                "maxPerRow": 4,
+                "custom": {
+                    "textMode": "valueAndName",
+                    "calc": "lastNotNull",
+                    "valueField": "Value",
+                    "colorRange": [
+                        "thresholds"
+                    ],
+                    "detailUrl": "/components/dashboard/detail?__uuid__=1737103014612000&ident=${__field.labels.ident}"
+                },
+                "options": {
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "#ef3c3c",
+                                "value": 95,
+                                "type": ""
+                            },
+                            {
+                                "color": "#ff656b",
+                                "type": "",
+                                "value": 85
+                            },
+                            {
+                                "color": "#ffae39",
+                                "type": "",
+                                "value": 75
+                            },
+                            {
+                                "color": "#2c9d3d",
+                                "type": "base",
+                                "value": null
+                            }
+                        ]
+                    },
+                    "standardOptions": {
+                        "util": "percent",
+                        "decimals": 2
+                    }
+                }
+            },
+            {
+                "type": "table",
+                "id": "77bf513a-8504-4d33-9efe-75aaf9abc9e4",
+                "layout": {
+                    "h": 11,
+                    "i": "77bf513a-8504-4d33-9efe-75aaf9abc9e4",
+                    "isResizable": true,
+                    "w": 24,
+                    "x": 0,
+                    "y": 5
+                },
+                "version": "3.1.0",
+                "datasourceCate": "prometheus",
+                "datasourceValue": "${prom}",
+                "targets": [
+                    {
+                        "expr": "avg(cpu_usage_active{cpu=\"cpu-total\", ident=~\"$ident\"}) by (ident)",
+                        "legend": "CPU使用率",
+                        "maxDataPoints": 240,
+                        "refId": "A"
+                    },
+                    {
+                        "expr": "avg(mem_used_percent{ident=~\"$ident\"}) by (ident)",
+                        "legend": "内存使用率",
+                        "maxDataPoints": 240,
+                        "refId": "B"
+                    },
+                    {
+                        "expr": "avg(mem_total{ident=~\"$ident\"}) by (ident)",
+                        "legend": "总内存",
+                        "maxDataPoints": 240,
+                        "refId": "C"
+                    },
+                    {
+                        "expr": "avg(disk_used_percent{ident=~\"$ident\",path=\"/\"}) by (ident)",
+                        "legend": "根分区使用率",
+                        "maxDataPoints": 240,
+                        "refId": "D"
+                    }
+                ],
+                "transformations": [
+                    {
+                        "id": "organize",
+                        "options": {
+                            "renameByName": {
+                                "ident": "机器"
+                            }
+                        }
+                    }
+                ],
+                "name": "机器列表",
+                "maxPerRow": 4,
+                "custom": {
+                    "showHeader": true,
+                    "colorMode": "background",
+                    "nowrap": false,
+                    "tableLayout": "fixed",
+                    "calc": "lastNotNull",
+                    "displayMode": "labelValuesToRows",
+                    "aggrDimension": "ident",
+                    "sortColumn": "ident",
+                    "sortOrder": "ascend",
+                    "pageLimit": 500,
+                    "linkMode": "appendLinkColumn",
+                    "links": [
+                        {
+                            "targetBlank": true,
+                            "title": "详情",
+                            "url": "/components/dashboard/detail?__uuid__=1737103014612000&ident=${__field.labels.ident}"
+                        }
+                    ]
+                },
+                "options": {
+                    "standardOptions": {
+                        "decimals": 2
+                    }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byFrameRefID",
+                            "value": "A"
+                        },
+                        "properties": {
+                            "standardOptions": {
+                                "util": "percent",
+                                "decimals": 2
+                            },
+                            "valueMappings": [
+                                {
+                                    "match": {
+                                        "to": 65
+                                    },
+                                    "result": {
+                                        "color": "#2c9d3d"
+                                    },
+                                    "type": "range"
+                                },
+                                {
+                                    "match": {
+                                        "to": 90
+                                    },
+                                    "result": {
+                                        "color": "#ff656b"
+                                    },
+                                    "type": "range"
+                                },
+                                {
+                                    "match": {
+                                        "from": 90
+                                    },
+                                    "result": {
+                                        "color": "#f50505"
+                                    },
+                                    "type": "range"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "matcher": {
+                            "id": "byFrameRefID",
+                            "value": "B"
+                        },
+                        "properties": {
+                            "standardOptions": {
+                                "util": "percent",
+                                "decimals": 2
+                            },
+                            "valueMappings": [
+                                {
+                                    "match": {
+                                        "to": 65
+                                    },
+                                    "result": {
+                                        "color": "#2c9d3d"
+                                    },
+                                    "type": "range"
+                                },
+                                {
+                                    "match": {
+                                        "to": 90
+                                    },
+                                    "result": {
+                                        "color": "#ff656b"
+                                    },
+                                    "type": "range"
+                                },
+                                {
+                                    "match": {
+                                        "from": 90
+                                    },
+                                    "result": {
+                                        "color": "#fa0a0a"
+                                    },
+                                    "type": "range"
+                                }
+                            ]
+                        },
+                        "type": "special"
+                    },
+                    {
+                        "matcher": {
+                            "id": "byFrameRefID",
+                            "value": "C"
+                        },
+                        "properties": {
+                            "standardOptions": {
+                                "decimals": 2,
+                                "util": "bytesIEC"
+                            },
+                            "valueMappings": []
+                        },
+                        "type": "special"
+                    },
+                    {
+                        "matcher": {
+                            "id": "byFrameRefID",
+                            "value": "D"
+                        },
+                        "properties": {
+                            "standardOptions": {
+                                "decimals": 2,
+                                "util": "percent"
+                            },
+                            "valueMappings": [
+                                {
+                                    "match": {
+                                        "to": 90
+                                    },
+                                    "result": {
+                                        "color": "#2c9d3d"
+                                    },
+                                    "type": "range"
+                                },
+                                {
+                                    "match": {
+                                        "from": 90
+                                    },
+                                    "result": {
+                                        "color": "#ff656b"
+                                    },
+                                    "type": "range"
+                                }
+                            ]
+                        },
+                        "type": "special"
+                    }
+                ]
+            }
+        ],
+        "var": [
+            {
+                "name": "prom",
+                "label": "数据源",
+                "type": "datasource",
+                "hide": false,
+                "definition": "prometheus"
+            },
+            {
+                "name": "ident",
+                "label": "机器",
+                "type": "query",
+                "hide": false,
+                "multi": true,
+                "allOption": true,
+                "allValue": ".*",
+                "datasource": {
+                    "cate": "prometheus",
+                    "value": "${prom}"
+                },
+                "definition": "label_values(system_load1,ident)"
+            }
+        ],
+        "version": "3.0.0"
+    }
+}

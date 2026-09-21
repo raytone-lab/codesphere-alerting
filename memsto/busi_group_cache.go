@@ -1,0 +1,135 @@
+package memsto
+
+import (
+	"log"
+	"sync"
+	"time"
+
+	"github.com/ccfos/nightingale/v6/dumper"
+	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/ctx"
+
+	"github.com/pkg/errors"
+	"github.com/toolkits/pkg/logger"
+)
+
+type BusiGroupCacheType struct {
+	statTotal       int64
+	statLastUpdated int64
+	ctx             *ctx.Context
+	stats           *Stats
+
+	sync.RWMutex
+	ugs map[int64]*models.BusiGroup // key: id
+}
+
+func NewBusiGroupCache(ctx *ctx.Context, stats *Stats) *BusiGroupCacheType {
+	bg := &BusiGroupCacheType{
+		statTotal:       -1,
+		statLastUpdated: -1,
+		ugs:             make(map[int64]*models.BusiGroup),
+		ctx:             ctx,
+		stats:           stats,
+	}
+
+	bg.SyncBusiGroups()
+	return bg
+}
+
+func (c *BusiGroupCacheType) StatChanged(total, lastUpdated int64) bool {
+	if c.statTotal == total && c.statLastUpdated == lastUpdated {
+		return false
+	}
+
+	return true
+}
+
+func (c *BusiGroupCacheType) Set(ugs map[int64]*models.BusiGroup, total, lastUpdated int64) {
+	c.Lock()
+	c.ugs = ugs
+	c.Unlock()
+
+	// only one goroutine used, so no need lock
+	c.statTotal = total
+	c.statLastUpdated = lastUpdated
+}
+
+func (c *BusiGroupCacheType) GetByBusiGroupId(id int64) *models.BusiGroup {
+	c.RLock()
+	defer c.RUnlock()
+	return c.ugs[id]
+}
+
+func (c *BusiGroupCacheType) GetNamesByBusiGroupIds(ids []int64) []string {
+	c.RLock()
+	defer c.RUnlock()
+	names := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if ug, exists := c.ugs[id]; exists {
+			names = append(names, ug.Name)
+		}
+	}
+	return names
+}
+
+func (c *BusiGroupCacheType) SyncBusiGroups() {
+	err := c.syncBusiGroups()
+	if err != nil {
+		log.Fatalln("failed to sync busi groups:", err)
+	}
+
+	go c.loopSyncBusiGroups()
+}
+
+func (c *BusiGroupCacheType) loopSyncBusiGroups() {
+	duration := time.Duration(9000) * time.Millisecond
+	for {
+		time.Sleep(duration)
+		if err := c.syncBusiGroups(); err != nil {
+			logger.Warning("failed to sync busi groups:", err)
+		}
+	}
+}
+
+func (c *BusiGroupCacheType) syncBusiGroups() error {
+	start := time.Now()
+
+	stat, err := models.BusiGroupStatistics(c.ctx)
+	if err != nil {
+		dumper.PutSyncRecord("busi_groups", start.Unix(), -1, -1, "failed to query statistics: "+err.Error())
+		return errors.WithMessage(err, "failed to call BusiGroupStatistics")
+	}
+
+	if !c.StatChanged(stat.Total, stat.LastUpdated) {
+		c.stats.GaugeCronDuration.WithLabelValues("sync_busi_groups").Set(0)
+		c.stats.GaugeSyncNumber.WithLabelValues("sync_busi_groups").Set(0)
+		dumper.PutSyncRecord("busi_groups", start.Unix(), -1, -1, "not changed")
+		return nil
+	}
+
+	m, err := models.BusiGroupGetMap(c.ctx)
+	if err != nil {
+		dumper.PutSyncRecord("busi_groups", start.Unix(), -1, -1, "failed to query records: "+err.Error())
+		return errors.WithMessage(err, "failed to call BusiGroupGetMap")
+	}
+
+	c.Set(m, stat.Total, stat.LastUpdated)
+
+	ms := time.Since(start).Milliseconds()
+	c.stats.GaugeCronDuration.WithLabelValues("sync_busi_groups").Set(float64(ms))
+	c.stats.GaugeSyncNumber.WithLabelValues("sync_busi_groups").Set(float64(len(m)))
+	dumper.PutSyncRecord("busi_groups", start.Unix(), ms, len(m), "success")
+
+	return nil
+}
+
+func (c *BusiGroupCacheType) GetNameByBusiGroupId(id int64) string {
+	c.RLock()
+	defer c.RUnlock()
+
+	busiGroup := c.ugs[id]
+	if busiGroup == nil {
+		return ""
+	}
+	return busiGroup.Name
+}

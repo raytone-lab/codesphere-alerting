@@ -1,0 +1,148 @@
+before:
+  hooks:
+    # You may remove this if you don't use go modules.
+    - go mod tidy
+    - go install github.com/rakyll/statik
+    # Sandbox assets are pre-built by the `sandbox-assets` CI job (native per-arch
+    # runners) and staged into pkg/sandbox/embedassets/ before this runs. Fail
+    # fast with a clear message if they're missing, instead of a cryptic go:embed
+    # "pattern matches no files" error from the -tags=sandbox_embed build below.
+    - bash -c 'for a in amd64 arm64; do for f in bwrap python-base.tar.gz n9e-sandbox-init; do test -s "pkg/sandbox/embedassets/linux_$a/$f" || { echo "missing sandbox asset linux_$a/$f — run scripts/build-sandbox-assets.sh $a"; exit 1; }; done; done'
+    # QA code corpus assets, staged by the workflow (or locally by the script)
+    # before this runs. Same fail-fast rationale as the sandbox assets above,
+    # for the -tags=qa_code_embed build.
+    - bash -c 'for f in n9e.tar.gz categraf.tar.gz fe.tar.gz manifest.json; do test -s "aiagent/skill/embedded/codeassets/$f" || { echo "missing QA code asset $f — run scripts/build-qa-code-assets.sh"; exit 1; }; done'
+    # Stage the bundled categraf packages (linux amd64 + arm64) into
+    # agents/categraf/, picked up below by archives.files and dockers.extra_files.
+    # Release-time only, deliberately not wired into `make build`: a local
+    # compile has no reason to pull ~110MB. The version pin lives in
+    # center/router/agentassets/categraf.version, which is also go:embed'ed, so
+    # the shipped tarball and the version the binary reports cannot drift.
+    - bash ./scripts/download_categraf.sh
+
+snapshot:
+  name_template: '{{ .Tag }}'
+checksum:
+  name_template: 'checksums.txt'
+changelog:
+  skip: true
+
+builds:
+  - id: build
+    hooks:
+      pre:
+      - cmd: sh -x ./fe.sh
+        output: true
+    main: ./cmd/center/
+    binary: n9e
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    # Bake the embedded sandbox assets (selects embed_linux_<arch>.go instead
+    # of embed_off.go) and the QA code corpus (selects code_embed.go instead
+    # of code_embed_off.go) into n9e. Only the center binary reaches
+    # pkg/sandbox / aiagent, so build-cli / build-edge intentionally stay
+    # un-tagged (no wasted bloat).
+    flags:
+      - -tags=sandbox_embed,qa_code_embed
+    ldflags:
+      - -s -w
+      - -X github.com/ccfos/nightingale/v6/pkg/version.Version={{ .Tag }}-{{.Commit}}
+  - id: build-cli
+    main: ./cmd/cli/
+    binary: n9e-cli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/ccfos/nightingale/v6/pkg/version.Version={{ .Tag }}-{{.Commit}}
+  - id: build-edge
+    main: ./cmd/edge/
+    binary: n9e-edge
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/ccfos/nightingale/v6/pkg/version.Version={{ .Tag }}-{{.Commit}}
+
+archives:
+  - id: n9e
+    builds:
+      - build
+      - build-cli
+      - build-edge
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: "n9e-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    wrap_in_directory: false
+    files:
+      - docker/*
+      - etc/*
+      - integrations/*
+      - cli/*
+      - agents/categraf/*
+      - n9e.sql
+
+release:
+  github:
+    owner: ccfos
+    name: nightingale
+  name_template: "v{{ .Version }}"
+
+dockers:
+  - image_templates:
+      - flashcatcloud/nightingale:{{ .Version }}-amd64
+    goos: linux
+    goarch: amd64
+    ids:
+      - build
+    dockerfile: docker/Dockerfile.goreleaser
+    extra_files:
+      - etc
+      - integrations
+      - agents
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+  - image_templates:
+      - flashcatcloud/nightingale:{{ .Version }}-arm64v8
+    goos: linux
+    goarch: arm64
+    ids:
+      - build
+    dockerfile: docker/Dockerfile.goreleaser.arm64
+    extra_files:
+      - etc
+      - integrations
+      - agents
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64/v8"
+
+docker_manifests:
+
+  - name_template: flashcatcloud/nightingale:{{ .Version }}
+    image_templates:
+      - flashcatcloud/nightingale:{{ .Version }}-amd64
+      - flashcatcloud/nightingale:{{ .Version }}-arm64v8
+
+  - name_template: flashcatcloud/nightingale:latest
+    image_templates:
+      - flashcatcloud/nightingale:{{ .Version }}-amd64
+      - flashcatcloud/nightingale:{{ .Version }}-arm64v8

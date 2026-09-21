@@ -1,0 +1,168 @@
+[
+    {
+        "id": 0,
+        "group_id": 0,
+        "cate": "prometheus",
+        "datasource_ids": [
+            0
+        ],
+        "cluster": "",
+        "name": "DisksOffline",
+        "note": "Disks down in MinIO deployment",
+        "prod": "metric",
+        "algorithm": "",
+        "algo_params": null,
+        "delay": 0,
+        "severity": 2,
+        "severities": [
+            2
+        ],
+        "disabled": 1,
+        "prom_for_duration": 600,
+        "prom_ql": "avg_over_time(minio_cluster_disk_offline_total{}[5m]) \u003e 0",
+        "rule_config": {
+            "algo_params": null,
+            "inhibit": false,
+            "prom_ql": "",
+            "queries": [
+                {
+                    "prom_ql": "avg_over_time(minio_cluster_disk_offline_total{}[5m]) \u003e 0",
+                    "severity": 2
+                }
+            ],
+            "severity": 0
+        },
+        "prom_eval_interval": 15,
+        "enable_stime": "00:00",
+        "enable_stimes": [
+            "00:00"
+        ],
+        "enable_etime": "23:59",
+        "enable_etimes": [
+            "23:59"
+        ],
+        "enable_days_of_week": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "0"
+        ],
+        "enable_days_of_weeks": [
+            [
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "0"
+            ]
+        ],
+        "enable_in_bg": 0,
+        "notify_recovered": 1,
+        "notify_channels": [],
+        "notify_groups_obj": null,
+        "notify_groups": null,
+        "notify_repeat_step": 60,
+        "notify_max_number": 0,
+        "recover_duration": 0,
+        "callbacks": [],
+        "runbook_url": "",
+        "append_tags": [],
+        "annotations": {
+            "action": "1) 用 mc admin info \u003calias\u003e 确认离线的是哪个节点的哪块盘，以及集群还剩多少冗余；\n2) 到该节点用 dmesg -T | grep -iE 'i/o error|ata|scsi' 与 smartctl -a 判断是掉盘、坏盘还是挂载丢失；\n3) 挂载丢失的重新挂载后 MinIO 会自动纳管；坏盘的换盘后用 mc admin heal -r \u003calias\u003e 触发修复；\n4) 修复期间避免大量写入，并确认剩余冗余仍高于 EC 校验块数。"
+        },
+        "extra_config": null,
+        "create_at": 0,
+        "create_by": "",
+        "update_at": 0,
+        "update_by": "",
+        "uuid": 1717556328048390000
+    },
+    {
+        "id": 0,
+        "group_id": 0,
+        "cate": "prometheus",
+        "datasource_ids": [
+            0
+        ],
+        "cluster": "",
+        "name": "NodesOffline",
+        "note": "Node down in MinIO deployment",
+        "prod": "metric",
+        "algorithm": "",
+        "algo_params": null,
+        "delay": 0,
+        "severity": 2,
+        "severities": [
+            2
+        ],
+        "disabled": 1,
+        "prom_for_duration": 600,
+        "prom_ql": "avg_over_time(minio_cluster_nodes_offline_total{}[5m]) \u003e 0",
+        "rule_config": {
+            "algo_params": null,
+            "inhibit": false,
+            "prom_ql": "",
+            "queries": [
+                {
+                    "prom_ql": "avg_over_time(minio_cluster_nodes_offline_total{}[5m]) \u003e 0",
+                    "severity": 2
+                }
+            ],
+            "severity": 0
+        },
+        "prom_eval_interval": 15,
+        "enable_stime": "00:00",
+        "enable_stimes": [
+            "00:00"
+        ],
+        "enable_etime": "23:59",
+        "enable_etimes": [
+            "23:59"
+        ],
+        "enable_days_of_week": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "0"
+        ],
+        "enable_days_of_weeks": [
+            [
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "0"
+            ]
+        ],
+        "enable_in_bg": 0,
+        "notify_recovered": 1,
+        "notify_channels": [],
+        "notify_groups_obj": null,
+        "notify_groups": null,
+        "notify_repeat_step": 60,
+        "notify_max_number": 0,
+        "recover_duration": 0,
+        "callbacks": [],
+        "runbook_url": "",
+        "append_tags": [],
+        "annotations": {
+            "action": "1) 用 mc admin info \u003calias\u003e 确认离线节点，并 ping / ssh 确认机器是否存活；\n2) 机器存活则用 systemctl status minio 看进程与日志，常见是 OOM、磁盘挂载失败、证书过期；\n3) 集群内网不通的排查网络与安全组，MinIO 节点间需要互通；\n4) 节点恢复后用 mc admin heal -r \u003calias\u003e 触发数据修复并观察进度。"
+        },
+        "extra_config": null,
+        "create_at": 0,
+        "create_by": "",
+        "update_at": 0,
+        "update_by": "",
+        "uuid": 1717556328048820000
+    }
+]

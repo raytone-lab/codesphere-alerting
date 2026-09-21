@@ -1,0 +1,1307 @@
+[
+    {
+        "id": 0,
+        "uuid": 1717556328499238000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 CPU 利用率（system）",
+        "unit": "percent",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "irate(container_cpu_system_seconds_total{image!=\"\", image!~\".*pause.*\"}[3m]) * 100",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 CPU 利用率（system）",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container CPU utilization (system)",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328501571000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 CPU 利用率（user）",
+        "unit": "percent",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "irate(container_cpu_user_seconds_total{image!=\"\", image!~\".*pause.*\"}[3m]) * 100",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 CPU 利用率（user）",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container CPU utilization (user)",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328503579000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 CPU 利用率（整体，值不会大于 100）",
+        "unit": "percent",
+        "note": "只有设置了 limit 的容器才能计算此利用率",
+        "lang": "zh_CN",
+        "expression": "sum(\n  irate(container_cpu_usage_seconds_total{image!=\"\", image!~\".*pause.*\"}[3m])\n) by (pod,namespace,container,image)\n/\nsum(\n  container_spec_cpu_quota/container_spec_cpu_period\n) by (pod,namespace,container,image)",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 CPU 利用率（整体，值不会大于 100）",
+                "note": "只有设置了 limit 的容器才能计算此利用率"
+            },
+            {
+                "lang": "en_US",
+                "name": "Container CPU utilization (overall, the value will not be greater than 100)",
+                "note": "Only containers with limit set can calculate this utilization"
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328505581000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 CPU 利用率（整体，值可能大于 100）",
+        "unit": "percent",
+        "note": "如果是 200% 表示占用了 2 个核",
+        "lang": "zh_CN",
+        "expression": "irate(container_cpu_usage_seconds_total{image!=\"\", image!~\".*pause.*\"}[3m]) * 100",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 CPU 利用率（整体，值可能大于 100）",
+                "note": "如果是 200% 表示占用了 2 个核"
+            },
+            {
+                "lang": "en_US",
+                "name": "Container CPU utilization (overall, value may be greater than 100)",
+                "note": "If 200%, it means that 2 cores are occupied"
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328507566000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 CPU 每秒有多少 period",
+        "unit": "none",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "irate(container_cpu_cfs_periods_total{}[3m])",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 CPU 每秒有多少 period",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "How many periods does the container CPU have per second",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328509502000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 CPU 每秒被 throttle 的 period 量",
+        "unit": "none",
+        "note": "如果容器限制了 CPU，而 app 所需算法过多， 会被抑制使用，container_cpu_cfs_throttled_periods_total 统计总共有多少个 period 被抑制了，如果近期发生抑制是需要关注的，一些延迟敏感的 app 受影响尤为明显。出现被抑制的情况，大概率是需要升配了。",
+        "lang": "zh_CN",
+        "expression": "irate(container_cpu_cfs_throttled_periods_total{}[3m])",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 CPU 每秒被 throttle 的 period 量",
+                "note": "如果容器限制了 CPU，而 app 所需算法过多， 会被抑制使用，container_cpu_cfs_throttled_periods_total 统计总共有多少个 period 被抑制了，如果近期发生抑制是需要关注的，一些延迟敏感的 app 受影响尤为明显。出现被抑制的情况，大概率是需要升配了。"
+            },
+            {
+                "lang": "en_US",
+                "name": "The amount of periods that the container CPU is throttle per second",
+                "note": "If the container limits the CPU and the app requires too many algorithms, it will be suppressed. container _ CPU _ cfs _ throttled _ periods _ total counts how many periods have been suppressed in total. If suppression occurs recently, it needs attention. Some delay-sensitive apps are particularly affected. If it is suppressed, there is a high probability that it needs to be upgraded."
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328511466000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 CPU 被 throttle 的比例",
+        "unit": "percent",
+        "note": "这个值大于 0 就要注意",
+        "lang": "zh_CN",
+        "expression": "irate(container_cpu_cfs_throttled_periods_total{}[3m]) / irate(container_cpu_cfs_periods_total{}[3m]) * 100",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 CPU 被 throttle 的比例",
+                "note": "这个值大于 0 就要注意"
+            },
+            {
+                "lang": "en_US",
+                "name": "The proportion of container CPU being throttle",
+                "note": "If this value is greater than 0, pay attention"
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328513368000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 filesystem 使用率",
+        "unit": "percent",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_fs_usage_bytes / container_fs_limit_bytes * 100",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 filesystem 使用率",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container filesystem usage",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328515663000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 filesystem 使用量",
+        "unit": "bytesIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_fs_usage_bytes",
+        "expression_type": "metric_name",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 filesystem 使用量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container filesystem usage",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328517712000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 filesystem 当前 IO 次数",
+        "unit": "none",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_fs_io_current",
+        "expression_type": "metric_name",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 filesystem 当前 IO 次数",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container filesystem Current IO times",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328519514000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 filesystem 总量",
+        "unit": "bytesIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_fs_limit_bytes",
+        "expression_type": "metric_name",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 filesystem 总量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container filesystem Total",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328521362000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 inode free 量",
+        "unit": "sishort",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_fs_inodes_free",
+        "expression_type": "metric_name",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 inode free 量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container inode free amount",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328523734000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 inode total 量",
+        "unit": "sishort",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_fs_inodes_total",
+        "expression_type": "metric_name",
+        "metric_type": "counter",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 inode total 量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container inode total",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328525590000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 inode 使用率",
+        "unit": "percent",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "100 - container_fs_inodes_free / container_fs_inodes_total * 100",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 inode 使用率",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container inode usage",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328527508000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 IO 每秒写入 byte 量",
+        "unit": "bytesSecIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "sum(irate(container_fs_writes_bytes_total[3m])) by (namespace, pod)",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 IO 每秒写入 byte 量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container IO writes bytes per second",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328529476000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 IO 每秒读取 byte 量",
+        "unit": "bytesSecIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "sum(irate(container_fs_reads_bytes_total[3m])) by (namespace, pod)",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 IO 每秒读取 byte 量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container IO reads bytes per second",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328531514000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 memory cache 量",
+        "unit": "bytesIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_memory_cache{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 memory cache 量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container memory cache amount",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328533806000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 memory 使用率（Usage）",
+        "unit": "percent",
+        "note": "如果有大量文件 IO，有大量 container_memory_cache，container_memory_usage_bytes 和 container_memory_working_set_bytes 的大小会有差异",
+        "lang": "zh_CN",
+        "expression": "100 * container_memory_usage_bytes/container_spec_memory_limit_bytes\nand\ncontainer_spec_memory_limit_bytes != 0",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 memory 使用率（Usage）",
+                "note": "如果有大量文件 IO，有大量 container_memory_cache，container_memory_usage_bytes 和 container_memory_working_set_bytes 的大小会有差异"
+            },
+            {
+                "lang": "en_US",
+                "name": "Container memory Usage (Usage)",
+                "note": "If there is a large number of file IO and a large number of container _ memory _ cache, the size of container _ memory _ usage _ bytes and container _ memory _ working _ set _ bytes will be different"
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328536123000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 memory 使用率（Working Set）",
+        "unit": "percent",
+        "note": "如果有大量文件 IO，有大量 container_memory_cache，container_memory_usage_bytes 和 container_memory_working_set_bytes 的大小会有差异",
+        "lang": "zh_CN",
+        "expression": "100 * container_memory_working_set_bytes/container_spec_memory_limit_bytes\nand\ncontainer_spec_memory_limit_bytes != 0",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 memory 使用率（Working Set）",
+                "note": "如果有大量文件 IO，有大量 container_memory_cache，container_memory_usage_bytes 和 container_memory_working_set_bytes 的大小会有差异"
+            },
+            {
+                "lang": "en_US",
+                "name": "Container memory usage rate (Working Set)",
+                "note": "If there is a large number of file IO and a large number of container _ memory _ cache, the size of container _ memory _ usage _ bytes and container _ memory _ working _ set _ bytes will be different"
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328538777000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 memory 使用量（mapped_file）",
+        "unit": "bytesIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_memory_mapped_file{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 memory 使用量（mapped_file）",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container memory usage (mapped _ file)",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328540899000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 memory 使用量（RSS）",
+        "unit": "bytesIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_memory_rss{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 memory 使用量（RSS）",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container memory usage (RSS)",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328543073000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 memory 使用量（Swap）",
+        "unit": "bytesIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_memory_swap{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 memory 使用量（Swap）",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container memory usage (Swap)",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328545308000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 memory 使用量（Usage）",
+        "unit": "bytesIEC",
+        "note": "如果有大量文件 IO，有大量 container_memory_cache，container_memory_usage_bytes 和 container_memory_working_set_bytes 的大小会有差异",
+        "lang": "zh_CN",
+        "expression": "container_memory_usage_bytes{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 memory 使用量（Usage）",
+                "note": "如果有大量文件 IO，有大量 container_memory_cache，container_memory_usage_bytes 和 container_memory_working_set_bytes 的大小会有差异"
+            },
+            {
+                "lang": "en_US",
+                "name": "Container memory Usage",
+                "note": "If there is a large number of file IO and a large number of container _ memory _ cache, the size of container _ memory _ usage _ bytes and container _ memory _ working _ set _ bytes will be different"
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328547364000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 memory 使用量（Working Set）",
+        "unit": "bytesIEC",
+        "note": "如果有大量文件 IO，有大量 container_memory_cache，container_memory_usage_bytes 和 container_memory_working_set_bytes 的大小会有差异",
+        "lang": "zh_CN",
+        "expression": "container_memory_working_set_bytes{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 memory 使用量（Working Set）",
+                "note": "如果有大量文件 IO，有大量 container_memory_cache，container_memory_usage_bytes 和 container_memory_working_set_bytes 的大小会有差异"
+            },
+            {
+                "lang": "en_US",
+                "name": "Container memory usage (Working Set)",
+                "note": "If there is a large number of file IO and a large number of container _ memory _ cache, the size of container _ memory _ usage _ bytes and container _ memory _ working _ set _ bytes will be different"
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328549264000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 memory 分配失败次数（每秒）",
+        "unit": "none",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "rate(container_memory_failures_total{}[3m])",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 memory 分配失败次数（每秒）",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container memory allocation failures (per second)",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328551296000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 memory 限制量",
+        "unit": "bytesIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_spec_memory_limit_bytes{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 memory 限制量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container memory limit",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328553284000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 net 每秒发送 bit 量",
+        "unit": "bitsSecIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "sum(irate(container_network_transmit_bytes_total[3m])) by (namespace, pod) * 8",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 net 每秒发送 bit 量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container net sends bits per second",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328555450000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 net 每秒发送 byte 量",
+        "unit": "bytesSecIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "sum(irate(container_network_transmit_bytes_total[3m])) by (namespace, pod)",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 net 每秒发送 byte 量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container net sends bytes per second",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328557652000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 net 每秒发送数据包数量",
+        "unit": "sishort",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "irate(container_network_transmit_packets_total[3m])",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 net 每秒发送数据包数量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Number of packets sent per second by container net",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328559896000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 net 每秒发送时 drop 包数量",
+        "unit": "sishort",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "irate(container_network_transmit_packets_dropped_total[3m])",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 net 每秒发送时 drop 包数量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Number of drop packets sent by container net per second",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328563019000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 net 每秒发送错包数",
+        "unit": "sishort",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "irate(container_network_transmit_errors_total[3m])",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 net 每秒发送错包数",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Number of wrong packets sent by container net per second",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328565014000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 net 每秒接收 bit 量",
+        "unit": "bitsSecIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "sum(irate(container_network_receive_bytes_total[3m])) by (namespace, pod) * 8",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 net 每秒接收 bit 量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "The amount of bits received by the container net per second",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328566851000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 net 每秒接收 byte 量",
+        "unit": "bytesSecIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "sum(irate(container_network_receive_bytes_total[3m])) by (namespace, pod)",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 net 每秒接收 byte 量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container net receives bytes per second",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328568786000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 net 每秒接收数据包数量",
+        "unit": "sishort",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "irate(container_network_receive_packets_total[3m])",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 net 每秒接收数据包数量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Number of packets received per second by container net",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328570812000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 net 每秒接收时 drop 包数量",
+        "unit": "sishort",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "irate(container_network_receive_packets_dropped_total[3m])",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 net 每秒接收时 drop 包数量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Number of drop packets received by container net per second",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328572814000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器 net 每秒接收错包数",
+        "unit": "sishort",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "irate(container_network_receive_errors_total[3m])",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器 net 每秒接收错包数",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Number of wrong packets received by container net per second",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328574925000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器允许运行的最大线程数",
+        "unit": "none",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_threads_max{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器允许运行的最大线程数",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "The maximum number of threads the container is allowed to run",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328576878000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器内 1 号进程 soft ulimit 值",
+        "unit": "none",
+        "note": "容器内1号进程的软 ulimit 值。如果为-1，则无限制。",
+        "lang": "zh_CN",
+        "expression": "container_ulimits_soft{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器内 1 号进程 soft ulimit 值",
+                "note": "容器内1号进程的软 ulimit 值。如果为-1，则无限制。"
+            },
+            {
+                "lang": "en_US",
+                "name": "Process No. 1 soft ulimit value in container",
+                "note": "Soft ulimit value for process # 1 inside the container. If-1, there is no limit."
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328578812000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器已经运行的时间",
+        "unit": "seconds",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_start_time_seconds{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器已经运行的时间",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "How long the container has been running",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328580653000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器当前打开套接字数量",
+        "unit": "none",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_sockets{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器当前打开套接字数量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Number of currently open sockets in the container",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328582431000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器当前打开文件句柄数量",
+        "unit": "none",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_file_descriptors{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器当前打开文件句柄数量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container Number of currently open file handles",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328584349000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器当前运行的线程数",
+        "unit": "none",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_threads{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器当前运行的线程数",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Number of threads currently running in the container",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328586195000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器当前运行的进程数",
+        "unit": "none",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_processes{image!=\"\", image!~\".*pause.*\"}",
+        "expression_type": "promql",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器当前运行的进程数",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Number of processes currently running in the container",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328588204000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器总 GPU 加速卡可用内存量",
+        "unit": "bytesIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_accelerator_memory_total_bytes",
+        "expression_type": "metric_name",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器总 GPU 加速卡可用内存量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "Container Total GPU Accelerator Available Memory",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    },
+    {
+        "id": 0,
+        "uuid": 1717556328590070000,
+        "collector": "Exporter",
+        "typ": "cAdvisor",
+        "name": "容器正在使用的 GPU 加速卡内存量",
+        "unit": "bytesIEC",
+        "note": "",
+        "lang": "zh_CN",
+        "expression": "container_accelerator_memory_used_bytes",
+        "expression_type": "metric_name",
+        "metric_type": "gauge",
+        "translation": [
+            {
+                "lang": "zh_CN",
+                "name": "容器正在使用的 GPU 加速卡内存量",
+                "note": ""
+            },
+            {
+                "lang": "en_US",
+                "name": "The amount of GPU accelerator card memory the container is using",
+                "note": ""
+            }
+        ],
+        "created_at": 0,
+        "created_by": "",
+        "updated_at": 0,
+        "updated_by": ""
+    }
+]

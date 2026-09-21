@@ -1,0 +1,68 @@
+package cfg
+
+import (
+	"bytes"
+	"fmt"
+	"path"
+	"strings"
+
+	"github.com/koding/multiconfig"
+	"github.com/toolkits/pkg/file"
+	"github.com/toolkits/pkg/runner"
+)
+
+func LoadConfigByDir(configDir string, configPtr interface{}) error {
+	var (
+		tBuf []byte
+	)
+
+	loaders := []multiconfig.Loader{
+		&multiconfig.TagLoader{},
+		&multiconfig.EnvironmentLoader{},
+	}
+
+	if !file.IsExist(configDir) {
+		return fmt.Errorf("config directory: %s not exist. working directory: %s", configDir, runner.Cwd)
+	}
+
+	files, err := file.FilesUnder(configDir)
+	if err != nil {
+		return fmt.Errorf("failed to list files under: %s : %v", configDir, err)
+	}
+
+	found := false
+
+	s := NewFileScanner()
+	for _, fpath := range files {
+		switch {
+		case strings.HasSuffix(fpath, ".toml"):
+			found = true
+			s.Read(path.Join(configDir, fpath))
+			tBuf = append(tBuf, s.Data()...)
+			tBuf = append(tBuf, []byte("\n")...)
+		case strings.HasSuffix(fpath, ".json"):
+			found = true
+			loaders = append(loaders, &multiconfig.JSONLoader{Path: path.Join(configDir, fpath)})
+		case strings.HasSuffix(fpath, ".yaml") || strings.HasSuffix(fpath, ".yml"):
+			found = true
+			loaders = append(loaders, &multiconfig.YAMLLoader{Path: path.Join(configDir, fpath)})
+		}
+		if s.Err() != nil {
+			return s.Err()
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("fail to found config file, config dir path: %v", configDir)
+	}
+
+	if len(tBuf) != 0 {
+		loaders = append(loaders, &multiconfig.TOMLLoader{Reader: bytes.NewReader(tBuf)})
+	}
+
+	m := multiconfig.DefaultLoader{
+		Loader:    multiconfig.MultiLoader(loaders...),
+		Validator: multiconfig.MultiValidator(&multiconfig.RequiredValidator{}),
+	}
+	return m.Load(configPtr)
+}

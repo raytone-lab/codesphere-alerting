@@ -1,0 +1,244 @@
+package astats
+
+import (
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+const (
+	namespace = "n9e"
+	subsystem = "alert"
+)
+
+type Stats struct {
+	AlertNotifyTotal            *prometheus.CounterVec
+	AlertNotifyErrorTotal       *prometheus.CounterVec
+	CounterAlertsTotal          *prometheus.CounterVec
+	GaugeAlertQueueSize         prometheus.Gauge
+	CounterRuleEval             *prometheus.CounterVec
+	CounterQueryDataErrorTotal  *prometheus.CounterVec
+	CounterQueryDataTotal       *prometheus.CounterVec
+	CounterVarFillingQuery      *prometheus.CounterVec
+	CounterRecordEval           *prometheus.CounterVec
+	CounterRecordEvalErrorTotal *prometheus.CounterVec
+	CounterMuteTotal            *prometheus.CounterVec
+	CounterRuleEvalErrorTotal   *prometheus.CounterVec
+	CounterHeartbeatErrorTotal  *prometheus.CounterVec
+	CounterSubEventTotal        *prometheus.CounterVec
+	GaugeQuerySeriesCount       *prometheus.GaugeVec
+	GaugeRuleEvalDuration       *prometheus.GaugeVec
+	GaugeRecordEvalDuration     *prometheus.GaugeVec
+	GaugeRecordSeriesCount      *prometheus.GaugeVec
+	GaugeNotifyRecordQueueSize  prometheus.Gauge
+	CounterEvalLogDropTotal     prometheus.Counter
+	// CounterEvalLogQueryRejectTotal 持续增长说明查询并发闸在起作用：
+	// 要么有人在反复刷记录页，要么 MaxConcurrentQueries 配得太紧
+	CounterEvalLogQueryRejectTotal prometheus.Counter
+}
+
+func NewSyncStats() *Stats {
+	CounterRuleEval := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "rule_eval_total",
+		Help:      "Number of rule eval.",
+	}, []string{})
+
+	CounterRuleEvalErrorTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "rule_eval_error_total",
+		Help:      "Number of rule eval error.",
+	}, []string{"datasource", "stage", "busi_group", "rule_id"})
+
+	CounterQueryDataErrorTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "query_data_error_total",
+		Help:      "Number of rule eval query data error.",
+	}, []string{"datasource"})
+
+	CounterQueryDataTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "query_data_total",
+		Help:      "Number of rule eval query data.",
+	}, []string{"datasource", "rule_id"})
+
+	CounterRecordEval := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "record_eval_total",
+		Help:      "Number of record eval.",
+	}, []string{"datasource", "rule_id"})
+
+	// labels: datasource = rule's write-target ds;
+	// query_datasource = ds actually being queried/written when the error fires (empty if not yet known);
+	// stage = pipeline phase (check_query / get_client / query_data / get_rule_config / convert_data / write_data).
+	CounterRecordEvalErrorTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "record_eval_error_total",
+		Help:      "Number of record eval errors, labeled by stage.",
+	}, []string{"datasource", "query_datasource", "stage", "rule_id"})
+
+	AlertNotifyTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "alert_notify_total",
+		Help:      "Number of send msg.",
+	}, []string{"channel"})
+
+	AlertNotifyErrorTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "alert_notify_error_total",
+		Help:      "Number of send msg.",
+	}, []string{"channel"})
+
+	// 产生的告警总量
+	CounterAlertsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "alerts_total",
+		Help:      "Total number alert events.",
+	}, []string{"cluster", "type", "busi_group"})
+
+	// 内存中的告警事件队列的长度
+	GaugeAlertQueueSize := prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "alert_queue_size",
+		Help:      "The size of alert queue.",
+	})
+
+	CounterMuteTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "mute_total",
+		Help:      "Number of mute.",
+	}, []string{"group", "rule_id", "mute_rule_id", "datasource_id"})
+
+	CounterSubEventTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "sub_event_total",
+		Help:      "Number of sub event.",
+	}, []string{"group"})
+
+	CounterHeartbeatErrorTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "heartbeat_error_count",
+		Help:      "Number of heartbeat error.",
+	}, []string{})
+
+	GaugeQuerySeriesCount := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "eval_query_series_count",
+		Help:      "Number of series retrieved from data source after query.",
+	}, []string{"rule_id", "datasource_id", "ref"})
+	// 通知记录队列的长度
+	GaugeNotifyRecordQueueSize := prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "notify_record_queue_size",
+		Help:      "The size of notify record queue.",
+	})
+
+	GaugeRuleEvalDuration := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "rule_eval_duration_ms",
+		Help:      "Duration of rule eval in milliseconds.",
+	}, []string{"rule_id", "datasource_id"})
+
+	GaugeRecordEvalDuration := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "record_eval_duration_ms",
+		Help:      "Duration of record eval in milliseconds.",
+	}, []string{"rule_id", "datasource_id"})
+
+	// Negative values encode error states:
+	//   -1 = query error
+	//   -2 = client / config missing
+	GaugeRecordSeriesCount := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "record_eval_series_count",
+		Help:      "Series count produced by the latest record eval; negative values encode error states.",
+	}, []string{"rule_id", "datasource_id"})
+
+	CounterVarFillingQuery := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "var_filling_query_total",
+		Help:      "Number of var filling query.",
+	}, []string{"rule_id", "datasource_id", "ref", "typ"})
+
+	// 评估执行记录被丢弃的条数（写入队列满，或降级到骨架后仍超出单行硬上限）
+	CounterEvalLogDropTotal := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "eval_log_drop_total",
+		Help:      "Number of eval log records dropped (full write queue, or still oversized after full degradation).",
+	})
+
+	// 查询被并发闸拒绝的次数（防止排障查询把告警引擎的内存/CPU 吃掉）
+	CounterEvalLogQueryRejectTotal := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: subsystem,
+		Name:      "eval_log_query_reject_total",
+		Help:      "Number of eval log queries rejected by the concurrency gate.",
+	})
+
+	prometheus.MustRegister(
+		CounterAlertsTotal,
+		GaugeAlertQueueSize,
+		AlertNotifyTotal,
+		AlertNotifyErrorTotal,
+		CounterRuleEval,
+		CounterQueryDataTotal,
+		CounterQueryDataErrorTotal,
+		CounterRecordEval,
+		CounterRecordEvalErrorTotal,
+		CounterMuteTotal,
+		CounterRuleEvalErrorTotal,
+		CounterHeartbeatErrorTotal,
+		CounterSubEventTotal,
+		GaugeQuerySeriesCount,
+		GaugeRuleEvalDuration,
+		GaugeRecordEvalDuration,
+		GaugeRecordSeriesCount,
+		GaugeNotifyRecordQueueSize,
+		CounterVarFillingQuery,
+		CounterEvalLogDropTotal,
+		CounterEvalLogQueryRejectTotal,
+	)
+
+	return &Stats{
+		CounterAlertsTotal:          CounterAlertsTotal,
+		GaugeAlertQueueSize:         GaugeAlertQueueSize,
+		AlertNotifyTotal:            AlertNotifyTotal,
+		AlertNotifyErrorTotal:       AlertNotifyErrorTotal,
+		CounterRuleEval:             CounterRuleEval,
+		CounterQueryDataTotal:       CounterQueryDataTotal,
+		CounterQueryDataErrorTotal:  CounterQueryDataErrorTotal,
+		CounterRecordEval:           CounterRecordEval,
+		CounterRecordEvalErrorTotal: CounterRecordEvalErrorTotal,
+		CounterMuteTotal:            CounterMuteTotal,
+		CounterRuleEvalErrorTotal:   CounterRuleEvalErrorTotal,
+		CounterHeartbeatErrorTotal:  CounterHeartbeatErrorTotal,
+		CounterSubEventTotal:        CounterSubEventTotal,
+		GaugeQuerySeriesCount:       GaugeQuerySeriesCount,
+		GaugeRuleEvalDuration:       GaugeRuleEvalDuration,
+		GaugeRecordEvalDuration:     GaugeRecordEvalDuration,
+		GaugeRecordSeriesCount:      GaugeRecordSeriesCount,
+		GaugeNotifyRecordQueueSize:  GaugeNotifyRecordQueueSize,
+		CounterVarFillingQuery:      CounterVarFillingQuery,
+		CounterEvalLogDropTotal:     CounterEvalLogDropTotal,
+
+		CounterEvalLogQueryRejectTotal: CounterEvalLogQueryRejectTotal,
+	}
+}

@@ -1,0 +1,265 @@
+{
+    "id": 0,
+    "group_id": 0,
+    "name": "Nginx Stub",
+    "ident": "",
+    "tags": "",
+    "create_at": 0,
+    "create_by": "",
+    "update_at": 0,
+    "update_by": "",
+    "configs": {
+        "links": [],
+        "panels": [
+            {
+                "custom": {
+                    "calc": "lastNotNull",
+                    "colSpan": 1,
+                    "colorMode": "value",
+                    "textMode": "value",
+                    "textSize": {}
+                },
+                "datasourceCate": "prometheus",
+                "datasourceValue": "${datasource}",
+                "id": "f29b8521-eb9f-41d5-8a79-1e222baabf9d",
+                "layout": {
+                    "h": 7,
+                    "i": "f29b8521-eb9f-41d5-8a79-1e222baabf9d",
+                    "isResizable": true,
+                    "w": 2,
+                    "x": 0,
+                    "y": 0
+                },
+                "links": [],
+                "name": "Requests",
+                "options": {
+                    "standardOptions": {},
+                    "valueMappings": [
+                        {
+                            "match": {
+                                "special": 1
+                            },
+                            "result": {
+                                "text": "UP"
+                            },
+                            "type": "special"
+                        },
+                        {
+                            "match": {
+                                "special": 0
+                            },
+                            "result": {
+                                "text": "DOWN"
+                            },
+                            "type": "special"
+                        }
+                    ]
+                },
+                "targets": [
+                    {
+                        "expr": "nginx_requests{server=\"$server\"}",
+                        "legend": "",
+                        "refId": "A"
+                    }
+                ],
+                "type": "stat",
+                "version": "2.0.0"
+            },
+            {
+                "custom": {
+                    "calc": "lastNotNull",
+                    "colSpan": 1,
+                    "colorMode": "value",
+                    "textMode": "value",
+                    "textSize": {}
+                },
+                "datasourceCate": "prometheus",
+                "datasourceValue": "${datasource}",
+                "id": "c0d3d10a-fd3b-485c-97e4-9f68ffc7a026",
+                "layout": {
+                    "h": 7,
+                    "i": "c0d3d10a-fd3b-485c-97e4-9f68ffc7a026",
+                    "isResizable": true,
+                    "w": 6,
+                    "x": 2,
+                    "y": 0
+                },
+                "links": [],
+                "name": "Active connections",
+                "options": {
+                    "standardOptions": {}
+                },
+                "targets": [
+                    {
+                        "expr": "nginx_active{server=\"$server\"}",
+                        "legend": "",
+                        "refId": "A"
+                    }
+                ],
+                "type": "stat",
+                "version": "2.0.0"
+            },
+            {
+                "custom": {
+                    "calc": "lastNotNull",
+                    "colSpan": 1,
+                    "colorMode": "value",
+                    "textMode": "value",
+                    "textSize": {}
+                },
+                "datasourceCate": "prometheus",
+                "datasourceValue": "${datasource}",
+                "id": "abbce8f8-222f-4e07-9e5e-fc85e7780672",
+                "layout": {
+                    "h": 7,
+                    "i": "abbce8f8-222f-4e07-9e5e-fc85e7780672",
+                    "isResizable": true,
+                    "w": 6,
+                    "x": 8,
+                    "y": 0
+                },
+                "links": [],
+                "name": "Waiting connections",
+                "options": {
+                    "standardOptions": {}
+                },
+                "targets": [
+                    {
+                        "expr": "nginx_waiting{server=\"$server\"}",
+                        "legend": "",
+                        "refId": "A"
+                    }
+                ],
+                "type": "stat",
+                "version": "2.0.0"
+            },
+            {
+                "custom": {
+                    "calc": "lastNotNull",
+                    "colSpan": 1,
+                    "colorMode": "value",
+                    "textMode": "value",
+                    "textSize": {}
+                },
+                "datasourceCate": "prometheus",
+                "datasourceValue": "${datasource}",
+                "id": "52f77144-19ba-4349-a7de-cedeb41ac3d7",
+                "layout": {
+                    "h": 7,
+                    "i": "52f77144-19ba-4349-a7de-cedeb41ac3d7",
+                    "isResizable": true,
+                    "w": 5,
+                    "x": 14,
+                    "y": 0
+                },
+                "links": [],
+                "name": "Reading connections",
+                "options": {
+                    "standardOptions": {}
+                },
+                "targets": [
+                    {
+                        "expr": "nginx_reading{server=\"$server\"}",
+                        "legend": "",
+                        "refId": "A"
+                    }
+                ],
+                "type": "stat",
+                "version": "2.0.0"
+            },
+            {
+                "custom": {
+                    "calc": "lastNotNull",
+                    "colSpan": 1,
+                    "colorMode": "value",
+                    "textMode": "value",
+                    "textSize": {}
+                },
+                "datasourceCate": "prometheus",
+                "datasourceValue": "${datasource}",
+                "id": "4c02d0ab-7dc7-466d-a610-be5810b7a1e6",
+                "layout": {
+                    "h": 7,
+                    "i": "4c02d0ab-7dc7-466d-a610-be5810b7a1e6",
+                    "isResizable": true,
+                    "w": 5,
+                    "x": 19,
+                    "y": 0
+                },
+                "links": [],
+                "name": "Writing connections",
+                "options": {
+                    "standardOptions": {}
+                },
+                "targets": [
+                    {
+                        "expr": "nginx_writing{server=\"$server\"}",
+                        "legend": "",
+                        "refId": "A"
+                    }
+                ],
+                "type": "stat",
+                "version": "2.0.0"
+            },
+            {
+                "custom": {
+                    "calc": "lastNotNull",
+                    "colSpan": 1,
+                    "colorMode": "value",
+                    "textMode": "value",
+                    "textSize": {}
+                },
+                "datasourceCate": "prometheus",
+                "datasourceValue": "${datasource}",
+                "id": "5e837a2b-b919-4ee5-8edf-b6bb490030ff",
+                "layout": {
+                    "h": 7,
+                    "i": "b13dce58-7f2a-4680-a9e4-507f7d5a2af8",
+                    "isResizable": true,
+                    "w": 5,
+                    "x": 0,
+                    "y": 7
+                },
+                "links": [],
+                "name": "handled",
+                "options": {
+                    "standardOptions": {}
+                },
+                "targets": [
+                    {
+                        "expr": "nginx_handled{server=\"$server\"}",
+                        "legend": "",
+                        "refId": "A"
+                    }
+                ],
+                "type": "stat",
+                "version": "2.0.0"
+            }
+        ],
+        "var": [
+            {
+                "definition": "prometheus",
+                "name": "datasource",
+                "type": "datasource"
+            },
+            {
+                "allOption": false,
+                "datasource": {
+                    "cate": "prometheus",
+                    "value": "${datasource}"
+                },
+                "definition": "label_values(nginx_active,server)",
+                "multi": false,
+                "name": "server",
+                "type": "query"
+            }
+        ],
+        "version": "3.0.0"
+    },
+    "public": 0,
+    "public_cate": 0,
+    "bgids": null,
+    "built_in": 0,
+    "hide": 0,
+    "uuid": 1717556328194546000
+}

@@ -1,32 +1,92 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
 *.exe
 *.exe~
 *.dll
-*.so
 *.dylib
-
-# Test binary, built with `go test -c`
 *.test
-
-# Code coverage profiles and other test artifacts
 *.out
-coverage.*
-*.coverprofile
-profile.cov
+*.prof
+*.log
+*.o
+*.a
+*.so
+*.db
+*.db*
+*.sw[po]
+*.tar.gz
+*.[568vq]
+[568vq].out
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
+*.cgo1.go
+*.cgo2.c
+_cgo_defun.c
+_cgo_gotypes.go
+_cgo_export.*
+_testmain.go
+_obj
+_test
 
-# Go workspace file
-go.work
-go.work.sum
+/log*
+/bin
+/out
+/build
+/dist
+/etc/*.local.yml
+/etc/*.local.conf
+/etc/rsa/*
+/etc/plugins/*.local.yml
+/etc/script/rules.yaml
+/etc/script/alert-rules.json
+/etc/script/record-rules.json
+/data*
+/tarball
+/run
+/vendor
+/tmp
+/pub
+# bundled categraf packages, staged at release time by scripts/download_categraf.sh
+/agents
+/n9e
+/docker/pub
+/docker/n9e
+/docker/compose-bridge/mysqldata
+/docker/compose-host-network/mysqldata
+/docker/compose-host-network-metric-log/mysqldata
+/docker/compose-host-network-metric-log/n9e-logs
+/docker/compose-postgres/pgdata
+/etc.local*
+/front/statik/statik.go
+/docker/compose-bridge/etc-nightingale/rsa/
 
-# env file
-.env
+.alerts
+.idea
+.index
+.vscode
+.issue
+.issue/*
+.cursor
+.claude
+.DS_Store
+.cache-loader
+.payload
+queries.active
+.playwright-mcp
 
-# Editor/IDE
-# .idea/
-# .vscode/
+/n9e-*
+/n9e_test
+n9e.sql
+*.bak
+
+# Runtime skill directory: built-in skills are extracted from embed at startup,
+# DB-synced user skills land here too. Source of truth is aiagent/skill/embedded/builtin/.
+/skill
+
+# Runtime QA code corpus: extracted at startup from the qa_code_embed assets
+# (see aiagent/skill/embedded/codeassets/, built by scripts/build-qa-code-assets.sh).
+/code
+
+!/datasource
+
+.env.json
+/aichat-cli
+/a2a-cli
+evallog/

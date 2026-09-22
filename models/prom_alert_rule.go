@@ -96,9 +96,8 @@ func ConvertAlert(rule PromRule, interval string, datasouceQueries []DatasourceQ
 //  2. A bare list of rules (treated as one synthetic group "imported_rules").
 //  3. A single rule object (wrapped the same way).
 //
-// Lives in the model layer so both center/router (HTTP handler) and the
-// aiagent builtin tool (import/preview) decode identically — there's no good
-// reason for two parsers to drift.
+// Lives in the model layer so HTTP import/preview handlers decode identically
+// — there's no good reason for two parsers to drift.
 func ParsePromRuleYAML(payload string) ([]PromRuleGroup, error) {
 	payload = strings.TrimSpace(payload)
 	if payload == "" {

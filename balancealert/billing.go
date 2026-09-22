@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/ccfos/nightingale/v6/datasource/postgresql"
-	"github.com/ccfos/nightingale/v6/dskit/postgres"
 	"github.com/ccfos/nightingale/v6/models"
 	"github.com/ccfos/nightingale/v6/pkg/ctx"
 
@@ -77,7 +76,7 @@ func wrapBillingSelectErr(err error) error {
 	}
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(err.Error(), "42501") || strings.Contains(msg, "permission denied") {
-		return fmt.Errorf("billing SELECT denied (GRANT SELECT on billing tables to the datasource user, or set billing_user/billing_password to table owner ruidong_billing): %w", err)
+		return fmt.Errorf("billing SELECT denied (GRANT SELECT on billing tables to the datasource user): %w", err)
 	}
 	return err
 }
@@ -111,6 +110,9 @@ func OpenStore(n9e *ctx.Context, s models.BalanceAlertSettings) (Store, error) {
 		return nil, err
 	}
 	_ = ds.Decrypt()
+	if ds.PluginType != postgresql.PostgreSQLType {
+		return nil, fmt.Errorf("datasource %d is %s, need pgsql", ds.Id, ds.PluginType)
+	}
 	plug := new(postgresql.PostgreSQL)
 	inst, err := plug.Init(ds.SettingsJson)
 	if err != nil {
@@ -121,22 +123,9 @@ func OpenStore(n9e *ctx.Context, s models.BalanceAlertSettings) (Store, error) {
 		return nil, fmt.Errorf("pgsql datasource %d has no shards", ds.Id)
 	}
 	shard := *pg.Shards[0]
-	if strings.TrimSpace(s.BillingUser) != "" {
-		shard.User = strings.TrimSpace(s.BillingUser)
-	}
-	if s.BillingPassword != "" {
-		shard.Password = s.BillingPassword
-	}
-	dbName := s.BillingDatabase
-	if dbName == "" {
-		_, dbName = postgres.SplitHostDatabase(shard.Addr)
-	}
-	if dbName == "" {
-		dbName = "ruidong_billing"
-	}
-	conn, err := shard.NewConn(context.Background(), dbName)
+	conn, err := shard.NewConn(context.Background(), strings.TrimSpace(shard.DB))
 	if err != nil {
-		return nil, fmt.Errorf("connect billing db %s: %w", dbName, err)
+		return nil, fmt.Errorf("connect billing db via datasource %d: %w", ds.Id, err)
 	}
 	return &PGStore{db: conn}, nil
 }

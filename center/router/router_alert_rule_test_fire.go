@@ -478,7 +478,7 @@ func (rt *Router) runTestFirePipelines(cfg *models.AlertRule, event *models.Aler
 			continue
 		}
 		if skipSend {
-			// 干跑：流水线节点（callback/aisummary 等）有真实外部副作用，不执行
+			// 干跑：流水线节点有真实外部副作用，不执行
 			item["status"] = "dry_run_skipped"
 			results = append(results, item)
 			continue

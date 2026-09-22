@@ -255,7 +255,7 @@ func MigrateTables(db *gorm.DB) error {
 		&models.UserToken{}, &models.DashAnnotation{}, MessageTemplate{}, NotifyRule{}, NotifyChannelConfig{}, &EsIndexPatternMigrate{},
 		&models.EventPipeline{}, &models.EmbeddedProduct{}, &models.SourceToken{},
 		&models.SavedView{}, &models.UserViewFavorite{},
-		&models.AILLMConfig{}, &models.BalanceAlertConfig{}, &models.BalanceAlertRecord{}}
+		&models.BalanceAlertConfig{}, &models.BalanceAlertRecord{}}
 
 	if isPostgres(db) {
 		dts = append(dts, &models.PostgresBuiltinComponent{})
@@ -418,7 +418,7 @@ type ChartShare struct {
 type TaskRecord struct {
 	EventId      int64  `gorm:"column:event_id;bigint(20);not null;default:0;comment:event id;index:idx_event_id"`
 	AuthLevel    int    `gorm:"column:auth_level;type:int;not null;default:0;comment:ai task auth level, 0=off 1/2/3=level"`
-	SystemCaller string `gorm:"column:system_caller;type:varchar(64);not null;default:'';comment:caller system, e.g. ai-agent"`
+	SystemCaller string `gorm:"column:system_caller;type:varchar(64);not null;default:'';comment:caller system"`
 }
 type TaskTpl struct {
 	AuthLevel int `gorm:"column:auth_level;type:int;not null;default:0;comment:ai task auth level, 0=off 1/2/3=level"`

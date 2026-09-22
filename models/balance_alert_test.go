@@ -47,29 +47,9 @@ func TestBalanceAlertSettingsRoundTrip(t *testing.T) {
 		t.Fatalf("saved: %+v", got)
 	}
 
-	got.BillingUser = "ruidong_billing"
-	got.BillingPassword = "secret"
-	if err := BalanceAlertSettingsPut(c, got, "root"); err != nil {
-		t.Fatalf("put password: %v", err)
-	}
-	got, err = BalanceAlertSettingsGet(c)
-	if err != nil {
-		t.Fatalf("get password: %v", err)
-	}
-	if got.BillingPassword != "secret" {
-		t.Fatalf("password not stored")
-	}
 	pub := got.Public()
-	if pub.BillingPassword != "" || !pub.BillingPasswordSet {
-		t.Fatalf("public leak: %+v", pub)
-	}
-	got.BillingPassword = ""
-	if err := BalanceAlertSettingsPut(c, got, "root"); err != nil {
-		t.Fatalf("put keep password: %v", err)
-	}
-	got, err = BalanceAlertSettingsGet(c)
-	if err != nil || got.BillingPassword != "secret" {
-		t.Fatalf("password should be kept: %+v err=%v", got, err)
+	if pub.DatasourceID != 2 {
+		t.Fatalf("public: %+v", pub)
 	}
 }
 

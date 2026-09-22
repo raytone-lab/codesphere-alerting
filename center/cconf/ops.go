@@ -85,6 +85,12 @@ func MergeOperationConf() error {
 const (
 	builtInOps = `
 ops:
+- name: balance-alert
+  cname: 预付费余额预警
+  ops:
+    - name: /system/balance-alert
+      cname: 预付费余额预警
+
 - name: alerting
   cname: Alerting
   ops:
@@ -250,8 +256,6 @@ ops:
       cname: View Alerting Engines
     - name: /help/servers # 兼容当前嵌入前端的告警引擎菜单 key
       cname: View Alerting Engines (legacy menu)
-    - name: /system/balance-alert
-      cname: Prepaid Balance Alert
 
 `
 )

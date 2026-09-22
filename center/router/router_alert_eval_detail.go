@@ -58,9 +58,9 @@ func (rt *Router) alertEvalDetailJSON(c *gin.Context) {
 }
 
 // getAlertEvalLogs resolves the target instance(s) and retrieves alert eval
-// logs. It keeps the flat shape the aiagent troubleshooting tool binds to, and
-// passes the truncation reason out with it - see getEventLogs for why the
-// model must not be handed a partial result that looks complete.
+// logs. It keeps a flat logs/instance/reason shape and passes the truncation
+// reason out with it - see getEventLogs for why callers must not be handed a
+// partial result that looks complete.
 func (rt *Router) getAlertEvalLogs(id string) ([]string, string, string, error) {
 	ruleId, _ := strconv.ParseInt(id, 10, 64)
 	rule, err := models.AlertRuleGetById(rt.Ctx, ruleId)

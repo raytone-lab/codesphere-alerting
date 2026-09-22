@@ -57,10 +57,6 @@ type BalanceAlertSettings struct {
 	PilotReceivers       []string `json:"pilot_receivers"`
 	VoucherThresholdUSD  float64  `json:"voucher_threshold_usd"`
 	DatasourceID         int64    `json:"datasource_id"`
-	BillingDatabase      string   `json:"billing_database"`
-	BillingUser          string   `json:"billing_user"`
-	BillingPassword      string   `json:"billing_password,omitempty"`
-	BillingPasswordSet   bool     `json:"billing_password_set"`
 	SmsWebhook           string   `json:"sms_webhook"`
 	CustomerPhoneSQLHint string   `json:"customer_phone_sql_hint,omitempty"`
 }
@@ -70,7 +66,6 @@ func DefaultBalanceAlertSettings() BalanceAlertSettings {
 		SendMode:            "OFF",
 		PilotReceivers:      []string{},
 		VoucherThresholdUSD: 20,
-		BillingDatabase:     "ruidong_billing",
 	}
 }
 
@@ -99,10 +94,7 @@ func BalanceAlertSettingsGet(ctx *ctx.Context) (BalanceAlertSettings, error) {
 }
 
 func (s BalanceAlertSettings) Public() BalanceAlertSettings {
-	out := s
-	out.BillingPasswordSet = s.BillingPassword != ""
-	out.BillingPassword = ""
-	return out
+	return s
 }
 
 func BalanceAlertSettingsPut(ctx *ctx.Context, s BalanceAlertSettings, username string) error {
@@ -119,14 +111,6 @@ func BalanceAlertSettingsPut(ctx *ctx.Context, s BalanceAlertSettings, username 
 	if s.PilotReceivers == nil {
 		s.PilotReceivers = []string{}
 	}
-	if s.BillingPassword == "" {
-		prev, err := BalanceAlertSettingsGet(ctx)
-		if err != nil {
-			return err
-		}
-		s.BillingPassword = prev.BillingPassword
-	}
-	s.BillingPasswordSet = false
 	b, err := json.Marshal(s)
 	if err != nil {
 		return err

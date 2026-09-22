@@ -89,11 +89,10 @@ func (rt *Router) getNodeForDatasource(datasourceId int64, pk string) (string, e
 	return ring.Get(pk)
 }
 
-// getEventLogs resolves the target instance and retrieves logs. It keeps the
-// flat shape the aiagent troubleshooting tool binds to, and passes the
-// truncation reason out with it: the search runs on a time budget, so an empty
-// or short result is not proof that nothing was logged, and the model has to
-// be told which of the two it is looking at.
+// getEventLogs resolves the target instance and retrieves logs. It keeps a
+// flat logs/instance/reason shape and passes the truncation reason out with
+// it: the search runs on a time budget, so an empty or short result is not
+// proof that nothing was logged.
 func (rt *Router) getEventLogs(hash string) ([]string, string, string, error) {
 	event, err := models.AlertHisEventGetByHash(rt.Ctx, hash)
 	if err != nil {
@@ -111,8 +110,8 @@ func (rt *Router) getEventLogs(hash string) ([]string, string, string, error) {
 	return resp.Logs, resp.Instance, truncatedReason(resp), nil
 }
 
-// truncatedReason turns the response flags into the reason string the aiagent
-// tools carry, empty when the result is known to be complete.
+// truncatedReason turns the response flags into the reason string callers
+// carry, empty when the result is known to be complete.
 func truncatedReason(resp loggrep.EventDetailResp) string {
 	if !resp.Truncated {
 		return ""

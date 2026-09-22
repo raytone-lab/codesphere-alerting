@@ -735,11 +735,6 @@ func (rt *Router) Config(r *gin.Engine) {
 
 			service.GET("/builtin-components", rt.builtinComponentsGets)
 			service.GET("/builtin-payloads", rt.builtinPayloadsGets)
-
-			service.GET("/ai-llm-configs", rt.aiLLMConfigGets)
-			service.GET("/ai-llm-config/:id", rt.aiLLMConfigGet)
-			service.POST("/ai-llm-configs", rt.aiLLMConfigAddByService)
-			service.PUT("/ai-llm-config/:id", rt.aiLLMConfigPutByService)
 		}
 	}
 

@@ -255,15 +255,6 @@ func TaskAdd(f models.TaskForm, authUser string, isCenter bool) (int64, error) {
 			}
 		}
 
-		taskHost := imodels.TaskHost{
-			Id:     taskMeta.Id,
-			Host:   hosts[0],
-			Status: "running",
-		}
-		if err = taskHost.Create(); err != nil {
-			logger.Warningf("task_add_fail: authUser=%s title=%s err=%s", authUser, taskMeta.Title, err.Error())
-		}
-
 		// 缓存任务元信息和待下发的任务
 		err = taskMeta.Cache(hosts[0])
 		if err != nil {

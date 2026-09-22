@@ -3,6 +3,7 @@ package balancealert
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -14,6 +15,8 @@ import (
 )
 
 // PrepaidSelectSQL is FR-01: enterprise, active, not deleted, no current available credit.
+// Available-credit predicate mirrors codesphere-billing enterprise-account.service
+// activeCreditLimitUsd: ACTIVE + limit>0 + terms_days>0 + effective/expires window.
 const PrepaidSelectSQL = `
 SELECT
   p.id,
@@ -28,11 +31,14 @@ FROM (
   WHERE a.type = 'enterprise'
     AND a.status = 'active'
     AND a.deleted_at IS NULL
+    AND a.provisioning_quarantined_at IS NULL
     AND NOT EXISTS (
       SELECT 1 FROM billing_account_credit_configs c
       WHERE c.billing_account_id = a.id
         AND c.status = 'ACTIVE'
         AND c.limit_usd > 0
+        AND c.terms_days IS NOT NULL
+        AND c.terms_days > 0
         AND (c.effective_at IS NULL OR c.effective_at <= now())
         AND (c.expires_at IS NULL OR c.expires_at > now())
     )
@@ -50,7 +56,19 @@ LEFT JOIN (
   FROM balance_transactions
   WHERE type = 'ADJUST' AND description LIKE 'voucher:%'
 ) v ON v.billing_account_id = p.id
-LEFT JOIN users u ON u.id = p.owner_user_id
+LEFT JOIN users u ON u.id = p.owner_user_id AND u.deleted_at IS NULL
+`
+
+// ConsumptionSelectSQL fetches 7-day and 3-day consumption totals per account.
+const ConsumptionSelectSQL = `
+SELECT
+  billing_account_id,
+  COALESCE(SUM(CASE WHEN created_at >= now() - INTERVAL '7 days' THEN amount_usd ELSE 0 END), 0) AS amount_7d,
+  COALESCE(SUM(CASE WHEN created_at >= now() - INTERVAL '3 days' THEN amount_usd ELSE 0 END), 0) AS amount_3d
+FROM balance_transactions
+WHERE type = 'CONSUME'
+  AND created_at >= now() - INTERVAL '7 days'
+GROUP BY billing_account_id
 `
 
 type Account struct {
@@ -62,8 +80,31 @@ type Account struct {
 	Phone        string
 }
 
+// ResolveAccountByUsernameSQL finds the enterprise billing account owned by the given username.
+const ResolveAccountByUsernameSQL = `
+SELECT a.id,
+       COALESCE(NULLIF(a.enterprise_name, ''), a.name, a.id) AS name,
+       COALESCE(w.balance_usd, 0) AS balance_usd,
+       COALESCE(u.phone, '') AS phone
+FROM users u
+JOIN billing_accounts a ON a.owner_user_id = u.id
+  AND a.type = 'enterprise' AND a.status = 'active' AND a.deleted_at IS NULL
+LEFT JOIN account_wallets w ON w.billing_account_id = a.id
+WHERE u.username = $1 AND u.deleted_at IS NULL
+LIMIT 1
+`
+
+type MyAccount struct {
+	ID      string
+	Name    string
+	Balance float64
+	Phone   string
+}
+
 type Store interface {
 	ListPrepaid(ctx context.Context) ([]Account, error)
+	ListConsumption(ctx context.Context) ([]Consumption, error)
+	ResolveAccountByUsername(ctx context.Context, username string) (*MyAccount, error)
 }
 
 type PGStore struct {
@@ -102,6 +143,40 @@ func (s *PGStore) ListPrepaid(ctx context.Context) ([]Account, error) {
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+func (s *PGStore) ListConsumption(ctx context.Context) ([]Consumption, error) {
+	rows, err := s.db.WithContext(ctx).Raw(ConsumptionSelectSQL).Rows()
+	if err != nil {
+		return nil, wrapBillingSelectErr(err)
+	}
+	defer rows.Close()
+
+	var out []Consumption
+	for rows.Next() {
+		var c Consumption
+		if err := rows.Scan(&c.AccountID, &c.Amount7D, &c.Amount3D); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *PGStore) ResolveAccountByUsername(ctx context.Context, username string) (*MyAccount, error) {
+	var a MyAccount
+	row := s.db.WithContext(ctx).Raw(ResolveAccountByUsernameSQL, username).Row()
+	err := row.Scan(&a.ID, &a.Name, &a.Balance, &a.Phone)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, wrapBillingSelectErr(err)
+	}
+	if a.ID == "" {
+		return nil, nil
+	}
+	return &a, nil
 }
 
 func OpenStore(n9e *ctx.Context, s models.BalanceAlertSettings) (Store, error) {

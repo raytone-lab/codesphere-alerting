@@ -189,6 +189,17 @@ func Initialize(configDir string, cryptoKey string) (func(), error) {
 	go cron.CleanNotifyRecord(ctx, config.Center.CleanNotifyRecordDay)
 	go cron.CleanPipelineExecution(ctx, config.Center.CleanPipelineExecutionDay)
 	go cron.CleanAlertHisEvent(ctx, config.Center.CleanAlertHisEventDay)
+	balancealert.SetDefaultSender(&balancealert.N9eNotifySender{
+		Ctx:                  ctx,
+		NotifyRuleCache:      notifyRuleCache,
+		NotifyChannelCache:   notifyChannelCache,
+		MessageTemplateCache: messageTemplateCache,
+		UserCache:            userCache,
+		UserGroupCache:       userGroupCache,
+		ConfigCvalCache:      configCvalCache,
+		Fallback:             balancealert.HTTPSender{HTTP: balancealert.DefaultHTTP()},
+	})
+	balancealert.SeedMessageTemplates(ctx)
 	go balancealert.StartCron(ctx)
 
 	alertrtRouter := alertrt.New(config.HTTP, config.Alert, alertMuteCache, targetCache, busiGroupCache, alertStats, ctx, externalProcessors, config.Log.Dir)

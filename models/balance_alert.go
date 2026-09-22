@@ -16,6 +16,12 @@ const (
 	BalanceAlertStateNormal   = "NORMAL"
 	BalanceAlertStateWarn     = "WARN"
 	BalanceAlertStateCritical = "CRITICAL"
+
+	ThresholdModeAuto  = "AUTO"
+	ThresholdModeCustom = "CUSTOM"
+
+	TriggerTypeStatic  = "STATIC"
+	TriggerTypeDynamic = "DYNAMIC"
 )
 
 type BalanceAlertConfig struct {
@@ -24,12 +30,40 @@ type BalanceAlertConfig struct {
 	CurrentState     string     `json:"current_state" gorm:"type:varchar(16);not null;default:NORMAL"`
 	StateSince       *time.Time `json:"state_since"`
 	LastAlertAt      *time.Time `json:"last_alert_at"`
+	ThresholdMode    string     `json:"threshold_mode" gorm:"type:varchar(16);not null;default:AUTO"`
+	ThresholdFixedUSD float64   `json:"threshold_fixed_usd" gorm:"type:numeric;not null;default:0"`
+	Receivers        string     `json:"receivers" gorm:"type:text"`
+	DynamicEnabled   bool       `json:"dynamic_enabled" gorm:"not null;default:false"`
 	CreatedAt        time.Time  `json:"created_at" gorm:"not null"`
 	UpdatedAt        time.Time  `json:"updated_at" gorm:"not null"`
 }
 
 func (BalanceAlertConfig) TableName() string {
 	return "balance_alert_configs"
+}
+
+func (c *BalanceAlertConfig) ReceiverList() []string {
+	if c.Receivers == "" {
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal([]byte(c.Receivers), &list); err != nil {
+		return nil
+	}
+	return list
+}
+
+func (c *BalanceAlertConfig) SetReceiverList(list []string) {
+	if len(list) == 0 {
+		c.Receivers = ""
+		return
+	}
+	b, _ := json.Marshal(list)
+	c.Receivers = string(b)
+}
+
+func (c *BalanceAlertConfig) IsCustomThreshold() bool {
+	return c.ThresholdMode == ThresholdModeCustom && c.ThresholdFixedUSD > 0
 }
 
 type BalanceAlertRecord struct {
@@ -45,6 +79,7 @@ type BalanceAlertRecord struct {
 	Receiver         string     `json:"receiver" gorm:"type:varchar(255)"`
 	SentAt           *time.Time `json:"sent_at"`
 	OperatorReview   string     `json:"operator_review" gorm:"type:varchar(32)"`
+	TriggerType      string     `json:"trigger_type" gorm:"type:varchar(16);not null;default:STATIC"`
 	CreatedAt        time.Time  `json:"created_at" gorm:"not null;index:idx_balance_alert_account_created,priority:2"`
 }
 
@@ -54,11 +89,14 @@ func (BalanceAlertRecord) TableName() string {
 
 type BalanceAlertSettings struct {
 	SendMode             string   `json:"send_mode"`
-	PilotReceivers       []string `json:"pilot_receivers"`
+	PilotReceivers       []string `json:"pilot_receivers,omitempty"` // legacy; prefer PilotNotifyRuleID
 	VoucherThresholdUSD  float64  `json:"voucher_threshold_usd"`
 	DatasourceID         int64    `json:"datasource_id"`
-	SmsWebhook           string   `json:"sms_webhook"`
+	SmsWebhook           string   `json:"sms_webhook,omitempty"` // legacy; prefer CustomerNotifyRuleID
 	CustomerPhoneSQLHint string   `json:"customer_phone_sql_hint,omitempty"`
+	PilotNotifyRuleID    int64    `json:"pilot_notify_rule_id"`
+	CustomerNotifyRuleID int64    `json:"customer_notify_rule_id"`
+	DynamicNotifyRuleID  int64    `json:"dynamic_notify_rule_id"`
 }
 
 func DefaultBalanceAlertSettings() BalanceAlertSettings {
@@ -210,4 +248,46 @@ func BalanceAlertRecordGets(ctx *ctx.Context, accountID, level, status string, l
 
 func BalanceAlertRecordSetReview(ctx *ctx.Context, id, review string) error {
 	return DB(ctx).Model(&BalanceAlertRecord{}).Where("id = ?", id).Update("operator_review", review).Error
+}
+
+// BalanceAlertRecordHasLevelSince reports whether any WARN/CRITICAL record
+// (any status) exists for the account since the given time. Used by miss-report recon.
+func BalanceAlertRecordHasLevelSince(ctx *ctx.Context, accountID string, since time.Time) (bool, *time.Time, error) {
+	var rec BalanceAlertRecord
+	err := DB(ctx).Where(
+		"billing_account_id = ? AND level IN (?, ?) AND created_at >= ?",
+		accountID, BalanceAlertStateWarn, BalanceAlertStateCritical, since,
+	).Order("created_at desc").First(&rec).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil, nil
+	}
+	if err != nil {
+		return false, nil, err
+	}
+	t := rec.CreatedAt
+	return true, &t, nil
+}
+
+// BalanceAlertConfigPut upserts enterprise self-service fields (threshold_mode,
+// threshold_fixed_usd, receivers, dynamic_enabled) without touching state machine fields.
+func BalanceAlertConfigPut(ctx *ctx.Context, accountID string, cfg BalanceAlertConfig) error {
+	existing, err := BalanceAlertConfigGet(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	if existing == nil {
+		existing = &BalanceAlertConfig{
+			BillingAccountID: accountID,
+			Enabled:          true,
+			CurrentState:     BalanceAlertStateNormal,
+			CreatedAt:        now,
+		}
+	}
+	existing.ThresholdMode = cfg.ThresholdMode
+	existing.ThresholdFixedUSD = cfg.ThresholdFixedUSD
+	existing.Receivers = cfg.Receivers
+	existing.DynamicEnabled = cfg.DynamicEnabled
+	existing.UpdatedAt = now
+	return DB(ctx).Save(existing).Error
 }

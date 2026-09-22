@@ -14,12 +14,21 @@ import (
 )
 
 type fakeStore struct {
-	accts []Account
-	err   error
+	accts       []Account
+	consumption []Consumption
+	err         error
 }
 
 func (f fakeStore) ListPrepaid(ctx context.Context) ([]Account, error) {
 	return f.accts, f.err
+}
+
+func (f fakeStore) ListConsumption(ctx context.Context) ([]Consumption, error) {
+	return f.consumption, f.err
+}
+
+func (f fakeStore) ResolveAccountByUsername(ctx context.Context, username string) (*MyAccount, error) {
+	return nil, nil
 }
 
 func testRunnerCtx(t *testing.T) *ctx.Context {
@@ -52,8 +61,9 @@ func TestRunnerOFFProducesRecordsWithoutHTTP(t *testing.T) {
 			{ID: "ba2", Name: "充值户", Balance: 40, LastRecharge: recharge(1000)},
 			{ID: "ba3", Name: "无入账", Balance: 10},
 		}},
-		HTTP: httpClient,
-		Now:  func() time.Time { return time.Date(2026, 9, 21, 10, 0, 0, 0, locShanghai) },
+		HTTP:   httpClient,
+		Sender: HTTPSender{HTTP: httpClient},
+		Now:    func() time.Time { return time.Date(2026, 9, 21, 10, 0, 0, 0, locShanghai) },
 	}
 	stats, err := r.run(context.Background())
 	if err != nil {
@@ -87,8 +97,9 @@ func TestRunnerPilotAndCustomerAndCooldown(t *testing.T) {
 		Store: fakeStore{accts: []Account{
 			{ID: "ba1", Name: "数商云", Balance: 15, HasVoucher: true, Phone: "13800000000"},
 		}},
-		HTTP: httpClient,
-		Now:  func() time.Time { return now },
+		HTTP:   httpClient,
+		Sender: HTTPSender{HTTP: httpClient},
+		Now:    func() time.Time { return now },
 	}
 	stats, err := r.run(context.Background())
 	if err != nil {
@@ -134,6 +145,7 @@ func TestRunnerPilotAndCustomerAndCooldown(t *testing.T) {
 	r.Now = func() time.Time { return now.Add(24 * time.Hour) }
 	httpClient = &fakeHTTP{}
 	r.HTTP = httpClient
+	r.Sender = HTTPSender{HTTP: httpClient}
 	// still WARN (15 < 20, 15 < 30 hysteresis), same state so Decide stays WARN without send
 	stats, err = r.run(context.Background())
 	if err != nil {

@@ -13,18 +13,25 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ccfos/nightingale/v6/models"
 )
 
 type SendRequest struct {
 	Mode          string
 	Level         string
 	ThresholdMode string
+	TriggerType   string
+	AccountID     string
 	Name          string
 	Balance       float64
 	Threshold     float64
+	DynamicDays   float64
 	Phone         string
-	PilotURLs     []string
-	SmsURL        string
+	NotifyRuleID  int64
+	// Legacy HTTP fallback fields (used when NotifyRuleID is unset).
+	PilotURLs []string
+	SmsURL    string
 }
 
 type SendResult struct {
@@ -33,14 +40,20 @@ type SendResult struct {
 	Err      error
 }
 
-func RenderCopy(level, thresholdMode, name string, balance float64) string {
+func RenderCopy(req SendRequest) string {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = req.AccountID
+	}
 	switch {
-	case thresholdMode == ModeVoucherFixed && level != StateCritical:
+	case req.TriggerType == models.TriggerTypeDynamic:
+		return fmt.Sprintf("【签名】%s您好，按当前消耗速度，您的账户余额仅剩%s，请及时充值以避免服务中断。", name, FormatRemainingDays(req.DynamicDays))
+	case req.ThresholdMode == ModeVoucherFixed && req.Level != StateCritical:
 		return fmt.Sprintf("【签名】%s您好，您的体验额度即将用完，充值后可继续使用服务。", name)
-	case level == StateCritical:
+	case req.Level == StateCritical:
 		return fmt.Sprintf("【签名】%s您好，您的账户余额已耗尽/即将耗尽，服务即将暂停，请立即充值恢复。", name)
 	default:
-		return fmt.Sprintf("【签名】%s您好，您的账户余额为%.2f元，为避免影响业务调用请及时充值。", name, balance)
+		return fmt.Sprintf("【签名】%s您好，您的账户余额为%.2f元，为避免影响业务调用请及时充值。", name, req.Balance)
 	}
 }
 
@@ -195,7 +208,7 @@ func Dispatch(httpClient HTTPClient, req SendRequest) SendResult {
 		if strings.TrimSpace(req.SmsURL) == "" {
 			return SendResult{Channel: "SMS", Receiver: req.Phone, Err: fmt.Errorf("sms webhook not configured")}
 		}
-		body := RenderCopy(req.Level, req.ThresholdMode, req.Name, req.Balance)
+		body := RenderCopy(req)
 		err := httpClient.PostJSON(req.SmsURL, map[string]string{
 			"phone":   req.Phone,
 			"content": body,

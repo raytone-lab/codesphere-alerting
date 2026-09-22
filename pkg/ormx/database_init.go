@@ -3,7 +3,6 @@ package ormx
 import (
 	"database/sql"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -1402,36 +1401,6 @@ func (InitTaskHostDoing) TableOptions() string {
 	return "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
 }
 
-type InitTaskHost struct {
-	II     uint64 `gorm:"primaryKey;autoIncrement"`
-	ID     uint64 `gorm:"not null;uniqueIndex:id_host"`
-	Host   string `gorm:"size:128;not null;uniqueIndex:id_host"`
-	Status string `gorm:"size:32;not null"`
-	Stdout string `gorm:"type:text"`
-	Stderr string `gorm:"type:text"`
-}
-
-func (InitTaskHost) TableName() string {
-	return "task_host_0"
-}
-
-func (InitTaskHost) TableOptions() string {
-	return "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
-}
-
-type InitSqliteTaskHost struct {
-	II     uint64 `gorm:"primaryKey;autoIncrement"`
-	ID     uint64 `gorm:"not null;"`
-	Host   string `gorm:"size:128;not null;"`
-	Status string `gorm:"size:32;not null"`
-	Stdout string `gorm:"type:text"`
-	Stderr string `gorm:"type:text"`
-}
-
-func (InitSqliteTaskHost) TableName() string {
-	return "task_host_0"
-}
-
 func DataBaseInit(c DBConfig, db *gorm.DB) error {
 	switch strings.ToLower(c.DBType) {
 	case "mysql":
@@ -1452,7 +1421,6 @@ func sqliteDataBaseInit(db *gorm.DB) error {
 		&InitTaskScheduler{},
 		&InitTaskSchedulerHealth{},
 		&InitTaskHostDoing{},
-		&InitSqliteTaskHost{},
 		&InitBoardBusiGroup{},
 		&InitBuiltinComponent{},
 		&InitBuiltinPayload{},
@@ -1498,14 +1466,6 @@ func sqliteDataBaseInit(db *gorm.DB) error {
 		err := db.AutoMigrate(dt)
 		if err != nil {
 			fmt.Printf("sqliteDataBaseInit AutoMigrate error: %v\n", err)
-			return err
-		}
-	}
-
-	for i := 1; i <= 99; i++ {
-		tableName := "task_host_" + strconv.Itoa(i)
-		err := db.Table(tableName).AutoMigrate(&InitSqliteTaskHost{})
-		if err != nil {
 			return err
 		}
 	}
@@ -1645,7 +1605,6 @@ func mysqlDataBaseInit(db *gorm.DB) error {
 		&InitTaskScheduler{},
 		&InitTaskSchedulerHealth{},
 		&InitTaskHostDoing{},
-		&InitTaskHost{},
 		&InitBoardBusiGroup{},
 		&InitBuiltinComponent{},
 		&InitBuiltinPayload{},
@@ -1691,14 +1650,6 @@ func mysqlDataBaseInit(db *gorm.DB) error {
 		err := db.AutoMigrate(dt)
 		if err != nil {
 			logger.Errorf("mysqlDataBaseInit AutoMigrate error: %v\n", err)
-		}
-	}
-
-	for i := 1; i <= 99; i++ {
-		tableName := "task_host_" + strconv.Itoa(i)
-		err := db.Table(tableName).AutoMigrate(&InitTaskHost{})
-		if err != nil {
-			logger.Errorf("mysqlDataBaseInit AutoMigrate task_host_%d error: %v\n", i, err)
 		}
 	}
 
@@ -1837,7 +1788,6 @@ func postgresDataBaseInit(db *gorm.DB) error {
 		&InitTaskScheduler{},
 		&InitTaskSchedulerHealth{},
 		&InitTaskHostDoing{},
-		&InitTaskHost{},
 		&InitBoardBusiGroup{},
 		&InitBuiltinComponent{},
 		&InitpostgresBuiltinPayload{},
@@ -1883,14 +1833,6 @@ func postgresDataBaseInit(db *gorm.DB) error {
 		err := db.AutoMigrate(dt)
 		if err != nil {
 			fmt.Printf("postgresDataBaseInit AutoMigrate error: %v\n", err)
-			return err
-		}
-	}
-
-	for i := 1; i <= 99; i++ {
-		tableName := "task_host_" + strconv.Itoa(i)
-		err := db.Table(tableName).AutoMigrate(&InitTaskHost{})
-		if err != nil {
 			return err
 		}
 	}

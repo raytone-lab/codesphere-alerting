@@ -90,6 +90,8 @@ ops:
   ops:
     - name: /system/balance-alert
       cname: 预付费余额预警
+    - name: /system/enterprise-balance
+      cname: 企业余额预警配置
 
 - name: alerting
   cname: Alerting

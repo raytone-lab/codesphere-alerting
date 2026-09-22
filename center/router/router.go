@@ -519,8 +519,16 @@ func (rt *Router) Config(r *gin.Engine) {
 		pages.PUT("/balance-alert/settings", rt.auth(), rt.admin(), rt.balanceAlertSettingsPut)
 		pages.GET("/balance-alert/records", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertRecordsGet)
 		pages.GET("/balance-alert/configs", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertConfigsGet)
+		pages.GET("/balance-alert/config/:account_id", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertConfigGet)
+		pages.PUT("/balance-alert/config/:account_id", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertConfigPut)
 		pages.PUT("/balance-alert/records/:id/review", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertRecordReview)
 		pages.POST("/balance-alert/run", rt.auth(), rt.admin(), rt.balanceAlertRun)
+		pages.GET("/balance-alert/miss-reports", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertMissReports)
+
+		pages.GET("/balance-alert/my-config", rt.auth(), rt.user(), rt.balanceAlertMyConfigGet)
+		pages.PUT("/balance-alert/my-config", rt.auth(), rt.user(), rt.balanceAlertMyConfigPut)
+		pages.GET("/balance-alert/my-records", rt.auth(), rt.user(), rt.balanceAlertMyRecordsGet)
+		pages.GET("/balance-alert/my-status", rt.auth(), rt.user(), rt.balanceAlertMyStatusGet)
 		pages.GET("/site-info", rt.siteInfo)
 
 		// source token 相关路由
@@ -747,6 +755,14 @@ func (rt *Router) Config(r *gin.Engine) {
 			heartbeat.POST("/heartbeat", rt.heartbeat)
 		}
 	}
+
+	r.GET("/system/balance-alert", func(c *gin.Context) {
+		c.FileFromFS("/balance-alert.html", statikFS)
+	})
+
+	r.GET("/system/enterprise-balance", func(c *gin.Context) {
+		c.FileFromFS("/enterprise-balance.html", statikFS)
+	})
 
 	rt.configNoRoute(r, &statikFS)
 

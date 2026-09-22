@@ -22,6 +22,21 @@ func StartCron(n9e *ctx.Context) {
 		logger.Errorf("balancealert cron schedule: %v", err)
 		return
 	}
+
+	_, err = c.AddFunc("0 10 * * *", func() {
+		stats, err := RunOnceDynamic(n9e, nil)
+		if err != nil {
+			logger.Errorf("balancealert dynamic cron: %v", err)
+			return
+		}
+		logger.Infof("balancealert dynamic cron: prepaid=%d evaluated=%d sent=%d cooldown=%d failed=%d",
+			stats.Prepaid, stats.Evaluated, stats.Sent, stats.Cooldown, stats.Failed)
+	})
+	if err != nil {
+		logger.Errorf("balancealert dynamic cron schedule: %v", err)
+		return
+	}
+
 	c.Start()
-	logger.Info("balancealert cron started (every 15 minutes)")
+	logger.Info("balancealert cron started (static: every 15 minutes, dynamic: daily at 10:00)")
 }

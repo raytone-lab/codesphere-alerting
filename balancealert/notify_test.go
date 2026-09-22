@@ -5,20 +5,26 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ccfos/nightingale/v6/models"
 )
 
 func TestRenderCopy(t *testing.T) {
-	warn := RenderCopy(StateWarn, ModeLastRecharge5Pct, "数商云", 15.5)
+	warn := RenderCopy(SendRequest{Level: StateWarn, ThresholdMode: ModeLastRecharge5Pct, Name: "数商云", Balance: 15.5})
 	if warn != "【签名】数商云您好，您的账户余额为15.50元，为避免影响业务调用请及时充值。" {
 		t.Fatalf("warn copy: %s", warn)
 	}
-	crit := RenderCopy(StateCritical, ModeVoucherFixed, "数商云", -0.04)
+	crit := RenderCopy(SendRequest{Level: StateCritical, ThresholdMode: ModeVoucherFixed, Name: "数商云", Balance: -0.04})
 	if crit != "【签名】数商云您好，您的账户余额已耗尽/即将耗尽，服务即将暂停，请立即充值恢复。" {
 		t.Fatalf("critical copy must win over voucher: %s", crit)
 	}
-	voucher := RenderCopy(StateWarn, ModeVoucherFixed, "数商云", 15)
+	voucher := RenderCopy(SendRequest{Level: StateWarn, ThresholdMode: ModeVoucherFixed, Name: "数商云", Balance: 15})
 	if voucher != "【签名】数商云您好，您的体验额度即将用完，充值后可继续使用服务。" {
 		t.Fatalf("voucher copy: %s", voucher)
+	}
+	dyn := RenderCopy(SendRequest{Level: StateWarn, TriggerType: models.TriggerTypeDynamic, Name: "数商云", DynamicDays: 3.5})
+	if dyn != "【签名】数商云您好，按当前消耗速度，您的账户余额仅剩3.5天，请及时充值以避免服务中断。" {
+		t.Fatalf("dynamic copy: %s", dyn)
 	}
 }
 

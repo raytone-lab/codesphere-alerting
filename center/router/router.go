@@ -756,13 +756,10 @@ func (rt *Router) Config(r *gin.Engine) {
 		}
 	}
 
-	r.GET("/system/balance-alert", func(c *gin.Context) {
-		c.FileFromFS("/balance-alert.html", statikFS)
-	})
-
-	r.GET("/system/enterprise-balance", func(c *gin.Context) {
-		c.FileFromFS("/enterprise-balance.html", statikFS)
-	})
+	// /system/balance-alert 与 /system/enterprise-balance 走 NoRoute 返回
+	// index.html，由 pub/index.html 的 iframe overlay 挂自定义页。不要把这两条
+	// 路由直接打到内页 HTML，否则刷新会丢掉侧栏，且 UseFileAssets 时仍读
+	// 过期的 statik 副本。
 
 	rt.configNoRoute(r, &statikFS)
 

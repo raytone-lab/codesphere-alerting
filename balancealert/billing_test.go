@@ -5,6 +5,26 @@ import (
 	"testing"
 )
 
+func TestResolveAccountByEmailOrPhoneSQL(t *testing.T) {
+	needles := []string{
+		"owner_user_id = u.id",
+		"type = 'enterprise'",
+		"status = 'active'",
+		"deleted_at IS NULL",
+		"LOWER(TRIM(COALESCE(u.email, '')))",
+		"TRIM(COALESCE(u.phone, ''))",
+		"account_wallets",
+	}
+	for _, n := range needles {
+		if !strings.Contains(ResolveAccountByEmailOrPhoneSQL, n) {
+			t.Errorf("ResolveAccountByEmailOrPhoneSQL missing %q", n)
+		}
+	}
+	if strings.Contains(ResolveAccountByEmailOrPhoneSQL, "$1") {
+		t.Error("use GORM ? placeholders, not native $1")
+	}
+}
+
 func TestPrepaidSelectSQL(t *testing.T) {
 	needles := []string{
 		"type = 'enterprise'",

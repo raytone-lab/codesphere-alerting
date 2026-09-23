@@ -177,6 +177,13 @@ func notifySync(nctx *ctx.Context, nc *dispatch.NotifyContext) *provider.NotifyR
 	}
 }
 
+func severityEmoji(level string) string {
+	if level == StateCritical {
+		return "🔴"
+	}
+	return "🟠"
+}
+
 func buildSyntheticEvent(req SendRequest) *models.AlertCurEvent {
 	sev := 2
 	if req.Level == StateCritical {
@@ -199,6 +206,7 @@ func buildSyntheticEvent(req SendRequest) *models.AlertCurEvent {
 		"billing_account": req.AccountID,
 		"copy":            RenderCopy(req),
 		"pilot_line":      RenderPilotLine(name, req.Balance, req.Threshold, req.Level),
+		"severity_emoji":  severityEmoji(req.Level),
 	}
 	if req.TriggerType == models.TriggerTypeDynamic {
 		ann["remaining_days"] = FormatRemainingDays(req.DynamicDays)
@@ -238,12 +246,13 @@ func fallbackTplContent(req SendRequest) map[string]interface{} {
 	if name == "" {
 		name = req.AccountID
 	}
-	var body string
-	if req.Mode == SendModePilot {
-		body = RenderPilotLine(name, req.Balance, req.Threshold, req.Level)
-	} else {
-		body = RenderCopy(req)
-	}
+	body := fmt.Sprintf("%s 告警级别：%s级\n告警时间：%s\n企业名称：%s\n事由签名：%s\n当次触发时值：%.2f",
+		severityEmoji(req.Level), req.Level,
+		time.Now().Format("2006-01-02 15:04:05"),
+		name,
+		RenderCopy(req),
+		req.Balance,
+	)
 	return map[string]interface{}{
 		"content": body,
 		"text":    body,

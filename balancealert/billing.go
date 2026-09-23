@@ -80,8 +80,10 @@ type Account struct {
 	Phone        string
 }
 
-// ResolveAccountByUsernameSQL finds the enterprise billing account owned by the given username.
-const ResolveAccountByUsernameSQL = `
+// ResolveAccountByEmailOrPhoneSQL finds the enterprise billing account owned by
+// the billing user whose email and/or phone match. Placeholders are GORM `?`
+// (Postgres dialect rewrites them to $n). Email match is case-insensitive.
+const ResolveAccountByEmailOrPhoneSQL = `
 SELECT a.id,
        COALESCE(NULLIF(a.enterprise_name, ''), a.name, a.id) AS name,
        COALESCE(w.balance_usd, 0) AS balance_usd,
@@ -90,7 +92,11 @@ FROM users u
 JOIN billing_accounts a ON a.owner_user_id = u.id
   AND a.type = 'enterprise' AND a.status = 'active' AND a.deleted_at IS NULL
 LEFT JOIN account_wallets w ON w.billing_account_id = a.id
-WHERE u.username = $1 AND u.deleted_at IS NULL
+WHERE u.deleted_at IS NULL
+  AND (
+    (? <> '' AND LOWER(TRIM(COALESCE(u.email, ''))) = ?)
+    OR (? <> '' AND TRIM(COALESCE(u.phone, '')) = ?)
+  )
 LIMIT 1
 `
 
@@ -104,7 +110,7 @@ type MyAccount struct {
 type Store interface {
 	ListPrepaid(ctx context.Context) ([]Account, error)
 	ListConsumption(ctx context.Context) ([]Consumption, error)
-	ResolveAccountByUsername(ctx context.Context, username string) (*MyAccount, error)
+	ResolveAccountByEmailOrPhone(ctx context.Context, email, phone string) (*MyAccount, error)
 }
 
 type PGStore struct {
@@ -163,9 +169,14 @@ func (s *PGStore) ListConsumption(ctx context.Context) ([]Consumption, error) {
 	return out, rows.Err()
 }
 
-func (s *PGStore) ResolveAccountByUsername(ctx context.Context, username string) (*MyAccount, error) {
+func (s *PGStore) ResolveAccountByEmailOrPhone(ctx context.Context, email, phone string) (*MyAccount, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	phone = strings.TrimSpace(phone)
+	if email == "" && phone == "" {
+		return nil, nil
+	}
 	var a MyAccount
-	row := s.db.WithContext(ctx).Raw(ResolveAccountByUsernameSQL, username).Row()
+	row := s.db.WithContext(ctx).Raw(ResolveAccountByEmailOrPhoneSQL, email, email, phone, phone).Row()
 	err := row.Scan(&a.ID, &a.Name, &a.Balance, &a.Phone)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

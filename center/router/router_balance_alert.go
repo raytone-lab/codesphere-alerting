@@ -111,35 +111,65 @@ func (rt *Router) balanceAlertConfigPut(c *gin.Context) {
 
 var phoneRe = regexp.MustCompile(`^1[3-9]\d{9}$`)
 
-func (rt *Router) resolveMyBillingAccount(c *gin.Context) (*balancealert.MyAccount, error) {
-	username := c.GetString("username")
-	if username == "" {
-		ginx.Bomb(401, "not authenticated")
-		return nil, nil
+const (
+	myAccountNeedBind = "need_bind"
+	myAccountNotFound = "not_found"
+)
+
+func (rt *Router) resolveMyBillingAccount(c *gin.Context) (*balancealert.MyAccount, string, error) {
+	username := c.MustGet("username").(string)
+	user, err := models.UserGetByUsername(rt.Ctx, username)
+	if err != nil {
+		return nil, "", err
+	}
+	if user == nil {
+		return nil, myAccountNotFound, nil
+	}
+	email := strings.TrimSpace(user.Email)
+	phone := strings.TrimSpace(user.Phone)
+	if email == "" && phone == "" {
+		return nil, myAccountNeedBind, nil
 	}
 	settings, err := models.BalanceAlertSettingsGet(rt.Ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	store, err := balancealert.OpenStore(rt.Ctx, settings)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	acc, err := store.ResolveAccountByUsername(c.Request.Context(), username)
+	acc, err := store.ResolveAccountByEmailOrPhone(c.Request.Context(), email, phone)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if acc == nil {
-		ginx.Bomb(404, "未找到关联的预付费企业账户")
-		return nil, nil
+		return nil, myAccountNotFound, nil
 	}
-	return acc, nil
+	return acc, "", nil
+}
+
+func myAccountEmpty(reason string) map[string]interface{} {
+	return map[string]interface{}{
+		"billing_account_id": "",
+		"reason":             reason,
+	}
+}
+
+func myAccountMissingMsg(reason string) string {
+	if reason == myAccountNeedBind {
+		return "请先在个人中心绑定邮箱或手机号"
+	}
+	return "未找到关联的预付费企业账户"
 }
 
 func (rt *Router) balanceAlertMyConfigGet(c *gin.Context) {
-	acc, err := rt.resolveMyBillingAccount(c)
+	acc, reason, err := rt.resolveMyBillingAccount(c)
 	if err != nil {
 		ginx.NewRender(c).Data(nil, err)
+		return
+	}
+	if acc == nil {
+		ginx.NewRender(c).Data(myAccountEmpty(reason), nil)
 		return
 	}
 	cfg, err := models.BalanceAlertConfigGet(rt.Ctx, acc.ID)
@@ -148,15 +178,16 @@ func (rt *Router) balanceAlertMyConfigGet(c *gin.Context) {
 		return
 	}
 	out := map[string]interface{}{
-		"billing_account_id": acc.ID,
-		"enterprise_name":    acc.Name,
-		"current_phone":      acc.Phone,
-		"balance_usd":        acc.Balance,
-		"threshold_mode":     models.ThresholdModeAuto,
+		"billing_account_id":  acc.ID,
+		"enterprise_name":     acc.Name,
+		"current_phone":       acc.Phone,
+		"balance_usd":         acc.Balance,
+		"threshold_mode":      models.ThresholdModeAuto,
 		"threshold_fixed_usd": float64(0),
-		"receivers":          []string{},
-		"dynamic_enabled":    false,
-		"current_state":      models.BalanceAlertStateNormal,
+		"threshold_usd":       float64(0),
+		"receivers":           []string{},
+		"dynamic_enabled":     false,
+		"current_state":       models.BalanceAlertStateNormal,
 	}
 	if cfg != nil {
 		out["threshold_mode"] = cfg.ThresholdMode
@@ -165,13 +196,22 @@ func (rt *Router) balanceAlertMyConfigGet(c *gin.Context) {
 		out["dynamic_enabled"] = cfg.DynamicEnabled
 		out["current_state"] = cfg.CurrentState
 	}
+	settings, _ := models.BalanceAlertSettingsGet(rt.Ctx)
+	out["threshold_usd"] = settings.VoucherThresholdUSD
+	if cfg != nil && cfg.IsCustomThreshold() {
+		out["threshold_usd"] = cfg.ThresholdFixedUSD
+	}
 	ginx.NewRender(c).Data(out, nil)
 }
 
 func (rt *Router) balanceAlertMyConfigPut(c *gin.Context) {
-	acc, err := rt.resolveMyBillingAccount(c)
+	acc, reason, err := rt.resolveMyBillingAccount(c)
 	if err != nil {
 		ginx.NewRender(c).Data(nil, err)
+		return
+	}
+	if acc == nil {
+		ginx.NewRender(c).Message(myAccountMissingMsg(reason))
 		return
 	}
 	var body struct {
@@ -186,17 +226,21 @@ func (rt *Router) balanceAlertMyConfigPut(c *gin.Context) {
 		body.ThresholdMode = models.ThresholdModeAuto
 	}
 	if body.ThresholdMode != models.ThresholdModeAuto && body.ThresholdMode != models.ThresholdModeCustom {
-		ginx.Bomb(400, "threshold_mode must be AUTO or CUSTOM")
+		ginx.NewRender(c).Message("threshold_mode must be AUTO or CUSTOM")
+		return
 	}
 	if body.ThresholdMode == models.ThresholdModeCustom && body.ThresholdFixedUSD <= 0 {
-		ginx.Bomb(400, "threshold_fixed_usd must be > 0 when threshold_mode is CUSTOM")
+		ginx.NewRender(c).Message("自定义警戒线金额必须大于 0")
+		return
 	}
 	if len(body.Receivers) > 5 {
-		ginx.Bomb(400, "接收手机号最多 5 个")
+		ginx.NewRender(c).Message("接收手机号最多 5 个")
+		return
 	}
 	for _, phone := range body.Receivers {
 		if !phoneRe.MatchString(strings.TrimSpace(phone)) {
-			ginx.Bomb(400, "手机号格式不正确："+phone)
+			ginx.NewRender(c).Message("手机号格式不正确：" + phone)
+			return
 		}
 	}
 
@@ -218,9 +262,13 @@ func (rt *Router) balanceAlertMyConfigPut(c *gin.Context) {
 }
 
 func (rt *Router) balanceAlertMyRecordsGet(c *gin.Context) {
-	acc, err := rt.resolveMyBillingAccount(c)
+	acc, _, err := rt.resolveMyBillingAccount(c)
 	if err != nil {
 		ginx.NewRender(c).Data(nil, err)
+		return
+	}
+	if acc == nil {
+		ginx.NewRender(c).Data([]models.BalanceAlertRecord{}, nil)
 		return
 	}
 	lst, err := models.BalanceAlertRecordGets(rt.Ctx,
@@ -233,9 +281,13 @@ func (rt *Router) balanceAlertMyRecordsGet(c *gin.Context) {
 }
 
 func (rt *Router) balanceAlertMyStatusGet(c *gin.Context) {
-	acc, err := rt.resolveMyBillingAccount(c)
+	acc, reason, err := rt.resolveMyBillingAccount(c)
 	if err != nil {
 		ginx.NewRender(c).Data(nil, err)
+		return
+	}
+	if acc == nil {
+		ginx.NewRender(c).Data(myAccountEmpty(reason), nil)
 		return
 	}
 	cfg, err := models.BalanceAlertConfigGet(rt.Ctx, acc.ID)
@@ -244,12 +296,12 @@ func (rt *Router) balanceAlertMyStatusGet(c *gin.Context) {
 		return
 	}
 	out := map[string]interface{}{
-		"balance_usd":    acc.Balance,
-		"current_state":  models.BalanceAlertStateNormal,
-		"threshold_mode": models.ThresholdModeAuto,
-		"threshold_usd":  0,
+		"balance_usd":     acc.Balance,
+		"current_state":   models.BalanceAlertStateNormal,
+		"threshold_mode":  models.ThresholdModeAuto,
+		"threshold_usd":   0,
 		"dynamic_enabled": false,
-		"last_alert_at":  nil,
+		"last_alert_at":   nil,
 	}
 	if cfg != nil {
 		out["current_state"] = cfg.CurrentState

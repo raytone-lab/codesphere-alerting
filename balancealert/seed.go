@@ -1,6 +1,7 @@
 package balancealert
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/ccfos/nightingale/v6/models"
@@ -25,7 +26,7 @@ var seedTemplates = []seedTpl{
 		Weight:             0,
 		Content: map[string]string{
 			"title":   "预付费余额预警",
-			"content": `{{ index $event.AnnotationsJSON "pilot_line" }}`,
+			"content": "{{ index $event.AnnotationsJSON \"severity_emoji\" }} 告警级别：{{ index $event.AnnotationsJSON \"level\" }}级\n告警时间：{{ timeformat $event.TriggerTime }}\n企业名称：{{ index $event.AnnotationsJSON \"enterprise_name\" }}\n事由签名：{{ index $event.AnnotationsJSON \"copy\" }}\n当次触发时值：{{ $value }}",
 		},
 	},
 	{
@@ -74,6 +75,23 @@ func SeedMessageTemplates(n9e *ctx.Context) {
 			continue
 		}
 		if existing != nil {
+			if existing.Content["content"] != s.Content["content"] {
+				contentJSON, err := json.Marshal(s.Content)
+				if err != nil {
+					logger.Errorf("balancealert seed: marshal content for %s: %v", s.Ident, err)
+					continue
+				}
+				updates := map[string]interface{}{
+					"content":   string(contentJSON),
+					"update_at": time.Now().Unix(),
+					"update_by": "system",
+				}
+				if err := models.DB(n9e).Model(existing).Updates(updates).Error; err != nil {
+					logger.Errorf("balancealert seed: update template %s: %v", s.Ident, err)
+					continue
+				}
+				logger.Infof("balancealert seed: updated template %s (%s)", s.Ident, s.Name)
+			}
 			continue
 		}
 		now := time.Now().Unix()

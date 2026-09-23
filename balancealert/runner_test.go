@@ -27,7 +27,7 @@ func (f fakeStore) ListConsumption(ctx context.Context) ([]Consumption, error) {
 	return f.consumption, f.err
 }
 
-func (f fakeStore) ResolveAccountByUsername(ctx context.Context, username string) (*MyAccount, error) {
+func (f fakeStore) ResolveAccountByEmailOrPhone(ctx context.Context, email, phone string) (*MyAccount, error) {
 	return nil, nil
 }
 

@@ -29,7 +29,7 @@ func TestBalanceAlertSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get default: %v", err)
 	}
-	if got.SendMode != "OFF" || got.VoucherThresholdUSD != 20 || got.CriticalRepeatDays != 3 {
+	if got.SendMode != "OFF" || got.VoucherThresholdUSD != 20 || got.CriticalRepeatDays != 3 || !got.AlertEnabled() {
 		t.Fatalf("defaults: %+v", got)
 	}
 	if got.CriticalRepeatAfter() != 72*time.Hour {
@@ -64,6 +64,19 @@ func TestBalanceAlertSettingsRoundTrip(t *testing.T) {
 	}
 	if got.CriticalRepeatDays != 3 {
 		t.Fatalf("zero days should default to 3: %+v", got)
+	}
+
+	off := false
+	got.Enabled = &off
+	if err := BalanceAlertSettingsPut(c, got, "root"); err != nil {
+		t.Fatalf("put disabled: %v", err)
+	}
+	got, err = BalanceAlertSettingsGet(c)
+	if err != nil {
+		t.Fatalf("get disabled: %v", err)
+	}
+	if got.AlertEnabled() {
+		t.Fatal("expected disabled")
 	}
 
 	pub := got.Public()

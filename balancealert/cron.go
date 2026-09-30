@@ -15,6 +15,10 @@ func StartCron(n9e *ctx.Context) {
 			logger.Errorf("balancealert cron: %v", err)
 			return
 		}
+		if stats.Disabled {
+			logger.Info("balancealert cron skipped: globally disabled")
+			return
+		}
 		logger.Infof("balancealert cron: prepaid=%d skipped=%d sent=%d cooldown=%d failed=%d",
 			stats.Prepaid, stats.SkippedIncome, stats.Sent, stats.Cooldown, stats.Failed)
 	})
@@ -29,6 +33,10 @@ func StartCron(n9e *ctx.Context) {
 			logger.Errorf("balancealert dynamic cron: %v", err)
 			return
 		}
+		if stats.Disabled {
+			logger.Info("balancealert dynamic cron skipped: globally disabled")
+			return
+		}
 		logger.Infof("balancealert dynamic cron: prepaid=%d evaluated=%d sent=%d cooldown=%d failed=%d",
 			stats.Prepaid, stats.Evaluated, stats.Sent, stats.Cooldown, stats.Failed)
 	})
@@ -41,6 +49,10 @@ func StartCron(n9e *ctx.Context) {
 		res, err := ReconMissReports(n9e, 7)
 		if err != nil {
 			logger.Errorf("balancealert miss-report cron: %v", err)
+			return
+		}
+		if res.Disabled {
+			logger.Info("balancealert miss-report cron skipped: globally disabled")
 			return
 		}
 		logger.Infof("balancealert miss-report cron: scanned=%d misses=%d", res.PrepaidScanned, len(res.Misses))

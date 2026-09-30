@@ -21,6 +21,7 @@ type MissReport struct {
 }
 
 type MissReportResult struct {
+	Disabled       bool         `json:"disabled,omitempty"`
 	AsOf           time.Time    `json:"as_of"`
 	LookbackDays   int          `json:"lookback_days"`
 	PrepaidScanned int          `json:"prepaid_scanned"`
@@ -43,6 +44,10 @@ func ReconMissReports(n9e *ctx.Context, lookbackDays int) (MissReportResult, err
 	settings, err := models.BalanceAlertSettingsGet(n9e)
 	if err != nil {
 		return out, err
+	}
+	if !settings.AlertEnabled() {
+		out.Disabled = true
+		return out, nil
 	}
 	store, err := OpenStore(n9e, settings)
 	if err != nil {

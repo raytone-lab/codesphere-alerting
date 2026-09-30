@@ -448,3 +448,38 @@ func TestRunnerSurgeIndependentDailyCap(t *testing.T) {
 		t.Fatalf("same-day surge cooldown: %+v", stats)
 	}
 }
+
+func TestRunnerGloballyDisabledSkipsAll(t *testing.T) {
+	n9e := testRunnerCtx(t)
+	s := models.DefaultBalanceAlertSettings()
+	off := false
+	s.Enabled = &off
+	if err := models.BalanceAlertSettingsPut(n9e, s, "root"); err != nil {
+		t.Fatal(err)
+	}
+	httpClient := &fakeHTTP{}
+	r := &Runner{
+		Ctx: n9e,
+		Store: fakeStore{accts: []Account{
+			{ID: "ba1", Name: "数商云", Balance: 1, HasVoucher: true},
+		}},
+		HTTP:   httpClient,
+		Sender: HTTPSender{HTTP: httpClient},
+		Now:    func() time.Time { return time.Date(2026, 9, 21, 10, 0, 0, 0, locShanghai) },
+	}
+	stats, err := r.run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stats.Disabled || stats.Prepaid != 0 || stats.Sent != 0 || len(httpClient.urls) != 0 {
+		t.Fatalf("disabled should skip: %+v urls=%v", stats, httpClient.urls)
+	}
+	dyn, err := r.runDynamic(context.Background())
+	if err != nil || !dyn.Disabled || dyn.Sent != 0 {
+		t.Fatalf("dynamic disabled: %+v err=%v", dyn, err)
+	}
+	recs, err := models.BalanceAlertRecordGets(n9e, "", "", "", 20)
+	if err != nil || len(recs) != 0 {
+		t.Fatalf("no records when disabled: n=%d err=%v", len(recs), err)
+	}
+}

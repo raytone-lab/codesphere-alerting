@@ -14,6 +14,7 @@ import (
 )
 
 type Stats struct {
+	Disabled      bool     `json:"disabled,omitempty"`
 	Prepaid       int      `json:"prepaid"`
 	SkippedIncome int      `json:"skipped_income"`
 	Evaluated     int      `json:"evaluated"`
@@ -62,6 +63,10 @@ func (r *Runner) run(std context.Context) (Stats, error) {
 	settings, err := models.BalanceAlertSettingsGet(r.Ctx)
 	if err != nil {
 		return stats, err
+	}
+	if !settings.AlertEnabled() {
+		stats.Disabled = true
+		return stats, nil
 	}
 
 	store := r.Store
@@ -117,6 +122,10 @@ func (r *Runner) runDynamic(std context.Context) (Stats, error) {
 	settings, err := models.BalanceAlertSettingsGet(r.Ctx)
 	if err != nil {
 		return stats, err
+	}
+	if !settings.AlertEnabled() {
+		stats.Disabled = true
+		return stats, nil
 	}
 
 	store := r.Store

@@ -92,6 +92,7 @@ func (BalanceAlertRecord) TableName() string {
 }
 
 type BalanceAlertSettings struct {
+	Enabled              *bool    `json:"enabled"`
 	SendMode             string   `json:"send_mode"`
 	PilotReceivers       []string `json:"pilot_receivers,omitempty"` // legacy; prefer PilotNotifyRuleID
 	VoucherThresholdUSD  float64  `json:"voucher_threshold_usd"`
@@ -104,13 +105,23 @@ type BalanceAlertSettings struct {
 	DynamicNotifyRuleID  int64    `json:"dynamic_notify_rule_id"`
 }
 
+func boolPtr(v bool) *bool {
+	b := v
+	return &b
+}
+
 func DefaultBalanceAlertSettings() BalanceAlertSettings {
 	return BalanceAlertSettings{
+		Enabled:             boolPtr(true),
 		SendMode:            "OFF",
 		PilotReceivers:      []string{},
 		VoucherThresholdUSD: 20,
 		CriticalRepeatDays:  DefaultCriticalRepeatDays,
 	}
+}
+
+func (s BalanceAlertSettings) AlertEnabled() bool {
+	return s.Enabled == nil || *s.Enabled
 }
 
 func (s BalanceAlertSettings) CriticalRepeatAfter() time.Duration {
@@ -149,10 +160,20 @@ func BalanceAlertSettingsGet(ctx *ctx.Context) (BalanceAlertSettings, error) {
 }
 
 func (s BalanceAlertSettings) Public() BalanceAlertSettings {
+	if s.Enabled == nil {
+		s.Enabled = boolPtr(true)
+	}
 	return s
 }
 
 func BalanceAlertSettingsPut(ctx *ctx.Context, s BalanceAlertSettings, username string) error {
+	if s.Enabled == nil {
+		prev, err := BalanceAlertSettingsGet(ctx)
+		if err != nil {
+			return err
+		}
+		s.Enabled = boolPtr(prev.AlertEnabled())
+	}
 	switch s.SendMode {
 	case "OFF", "PILOT", "CUSTOMER":
 	case "":

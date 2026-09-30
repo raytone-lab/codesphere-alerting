@@ -77,11 +77,12 @@ func MapToDatasource(gds GrafanaDatasource, plugins []cconf.Plugin) (*models.Dat
 		return nil, meta
 	}
 
-	// pgsql 目标连接硬编码 sslmode=disable（dskit/postgres），承载不了 Grafana 的 require/verify-* ——
-	// 强行导入等于把 TLS 降级为明文，泄露库凭据与查询数据。这类源先标记不支持，待 dskit 支持 sslmode 再放开。
+	// pgsql 目标连接硬编码 sslmode=require（dskit/postgres）。disable / 未设置 / require 导入后都走加密。
+	// verify-ca / verify-full 还要校验服务端证书，插件做不到，继续拒绝，避免静默放宽校验。
 	if rule.n9eType == "pgsql" {
-		if m := jsonDataString(gds.JSONData, "sslmode"); m != "" && m != "disable" {
-			meta.Reason = "postgres sslmode=" + m + " not supported (would downgrade TLS)"
+		m := jsonDataString(gds.JSONData, "sslmode")
+		if m != "" && m != "disable" && m != "require" {
+			meta.Reason = "postgres sslmode=" + m + " not supported (plugin uses sslmode=require)"
 			return nil, meta
 		}
 	}

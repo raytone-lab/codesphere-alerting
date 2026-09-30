@@ -323,13 +323,13 @@ func TestMapToDatasource_TLSSkipVerify(t *testing.T) {
 	})
 }
 
-// TestMapToDatasource_PostgresSSLMode 覆盖 pgsql 承载不了 TLS：sslmode 非 disable 的 postgres 标记不支持，
-// 避免导入后连接被硬编码降级到 sslmode=disable 而泄露凭据。
+// TestMapToDatasource_PostgresSSLMode 覆盖 pgsql 固定 sslmode=require：
+// require 可以导入；verify-* 仍不支持，避免把证书校验静默降成只加密。
 func TestMapToDatasource_PostgresSSLMode(t *testing.T) {
-	t.Run("sslmode require -> unsupported", func(t *testing.T) {
+	t.Run("sslmode require -> supported", func(t *testing.T) {
 		ds, meta := MapToDatasource(GrafanaDatasource{Type: "postgres", Name: "pg", URL: "10.0.0.2:5432", JSONData: map[string]interface{}{"sslmode": "require"}}, testPlugins)
-		if meta.Supported || ds != nil {
-			t.Fatalf("supported=%v ds=%+v, want unsupported", meta.Supported, ds)
+		if !meta.Supported || ds == nil {
+			t.Fatalf("supported=%v ds=%+v, want supported", meta.Supported, ds)
 		}
 	})
 	t.Run("sslmode verify-full -> unsupported", func(t *testing.T) {

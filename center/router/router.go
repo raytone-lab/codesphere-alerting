@@ -18,6 +18,7 @@ import (
 	"github.com/ccfos/nightingale/v6/memsto"
 	"github.com/ccfos/nightingale/v6/models"
 	"github.com/ccfos/nightingale/v6/pkg/aop"
+	"github.com/ccfos/nightingale/v6/pkg/authing"
 	"github.com/ccfos/nightingale/v6/pkg/ctx"
 	"github.com/ccfos/nightingale/v6/pkg/ginx"
 	"github.com/ccfos/nightingale/v6/pkg/httpx"
@@ -66,6 +67,8 @@ type Router struct {
 	TargetDeleteCheck     TargetDeleteCheckFunc
 	TargetBgidChangeCheck TargetBgidChangeCheckFunc
 	AlertRuleModifyHook   AlertRuleModifyHookFunc
+
+	AuthingOTP authing.PhoneCodes
 }
 
 // TargetDeleteCheckFunc 删除机器前的前置校验，返回不满足删除条件的机器及原因（ident -> 错误信息）。
@@ -105,6 +108,12 @@ func New(httpConfig httpx.Config, center cconf.Center, alert aconf.Alert, ibex c
 		TargetDeleteHook:      func(tx *gorm.DB, idents []string, force bool) error { return nil },
 		TargetDeleteCheck:     func(idents []string) map[string]string { return nil },
 		TargetBgidChangeCheck: func(idents []string, action string, bgids []int64) (map[string]string, error) { return nil, nil },
+		AuthingOTP: authing.Lazy(authing.Config{
+			AppHost:     center.Authing.AppHost,
+			AppID:       center.Authing.AppID,
+			AppSecret:   center.Authing.AppSecret,
+			RedirectURI: center.Authing.RedirectURI,
+		}),
 	}
 
 	return rt
@@ -527,6 +536,8 @@ func (rt *Router) Config(r *gin.Engine) {
 
 		pages.GET("/balance-alert/my-config", rt.auth(), rt.user(), rt.balanceAlertMyConfigGet)
 		pages.PUT("/balance-alert/my-config", rt.auth(), rt.user(), rt.balanceAlertMyConfigPut)
+		pages.POST("/balance-alert/my-config/otp", rt.auth(), rt.user(), rt.balanceAlertMyOTPSend)
+		pages.POST("/balance-alert/my-config/otp/verify", rt.auth(), rt.user(), rt.balanceAlertMyOTPVerify)
 		pages.GET("/balance-alert/my-records", rt.auth(), rt.user(), rt.balanceAlertMyRecordsGet)
 		pages.GET("/balance-alert/my-status", rt.auth(), rt.user(), rt.balanceAlertMyStatusGet)
 		pages.GET("/site-info", rt.siteInfo)

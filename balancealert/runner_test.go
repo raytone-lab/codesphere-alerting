@@ -169,3 +169,282 @@ func TestRunnerPilotAndCustomerAndCooldown(t *testing.T) {
 		t.Fatalf("sms url: %v", httpClient.urls)
 	}
 }
+
+func TestRunnerCriticalRepeatUsesSettings(t *testing.T) {
+	n9e := testRunnerCtx(t)
+	s := models.DefaultBalanceAlertSettings()
+	s.SendMode = SendModeOff
+	s.CriticalRepeatDays = 1
+	if err := models.BalanceAlertSettingsPut(n9e, s, "root"); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 9, 21, 10, 0, 0, 0, locShanghai)
+	sentAt := now.Add(-48 * time.Hour)
+	cfg := &models.BalanceAlertConfig{
+		BillingAccountID: "ba1",
+		Enabled:          true,
+		CurrentState:     StateCritical,
+		StateSince:       &sentAt,
+	}
+	if err := models.BalanceAlertConfigUpsert(n9e, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := models.BalanceAlertRecordInsert(n9e, &models.BalanceAlertRecord{
+		BillingAccountID: "ba1",
+		Level:            StateCritical,
+		BalanceUSD:       9,
+		ThresholdUSD:     20,
+		ThresholdMode:    ModeVoucherFixed,
+		SendMode:         SendModeOff,
+		Status:           StatusSent,
+		SentAt:           &sentAt,
+		CreatedAt:        sentAt,
+		TriggerType:      models.TriggerTypeStatic,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &Runner{
+		Ctx: n9e,
+		Store: fakeStore{accts: []Account{
+			{ID: "ba1", Name: "数商云", Balance: 9, HasVoucher: true},
+		}},
+		Now: func() time.Time { return now },
+	}
+	stats, err := r.run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Sent != 1 {
+		t.Fatalf("1-day CRITICAL interval after 2 days should send: %+v", stats)
+	}
+
+	s.CriticalRepeatDays = 5
+	if err := models.BalanceAlertSettingsPut(n9e, s, "root"); err != nil {
+		t.Fatal(err)
+	}
+	n9e2 := testRunnerCtx(t)
+	if err := models.BalanceAlertSettingsPut(n9e2, s, "root"); err != nil {
+		t.Fatal(err)
+	}
+	cfg2 := &models.BalanceAlertConfig{
+		BillingAccountID: "ba1",
+		Enabled:          true,
+		CurrentState:     StateCritical,
+		StateSince:       &sentAt,
+	}
+	if err := models.BalanceAlertConfigUpsert(n9e2, cfg2); err != nil {
+		t.Fatal(err)
+	}
+	if err := models.BalanceAlertRecordInsert(n9e2, &models.BalanceAlertRecord{
+		BillingAccountID: "ba1",
+		Level:            StateCritical,
+		BalanceUSD:       9,
+		ThresholdUSD:     20,
+		ThresholdMode:    ModeVoucherFixed,
+		SendMode:         SendModeOff,
+		Status:           StatusSent,
+		SentAt:           &sentAt,
+		CreatedAt:        sentAt,
+		TriggerType:      models.TriggerTypeStatic,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r2 := &Runner{
+		Ctx: n9e2,
+		Store: fakeStore{accts: []Account{
+			{ID: "ba1", Name: "数商云", Balance: 9, HasVoucher: true},
+		}},
+		Now: func() time.Time { return now },
+	}
+	stats, err = r2.run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Sent != 0 {
+		t.Fatalf("5-day CRITICAL interval after 2 days must not send: %+v", stats)
+	}
+}
+
+func TestRunnerCustomWarnDoesNotOverridePlatformCritical(t *testing.T) {
+	n9e := testRunnerCtx(t)
+	s := models.DefaultBalanceAlertSettings()
+	s.SendMode = SendModeOff
+	if err := models.BalanceAlertSettingsPut(n9e, s, "root"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &models.BalanceAlertConfig{
+		BillingAccountID:  "ba1",
+		Enabled:           true,
+		CurrentState:      StateNormal,
+		ThresholdMode:     models.ThresholdModeCustom,
+		ThresholdFixedUSD: 100,
+	}
+	if err := models.BalanceAlertConfigUpsert(n9e, cfg); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 21, 10, 0, 0, 0, locShanghai)
+	r := &Runner{
+		Ctx: n9e,
+		Store: fakeStore{accts: []Account{
+			{ID: "ba1", Name: "数商云", Balance: 50, HasVoucher: true},
+		}},
+		Now: func() time.Time { return now },
+	}
+	stats, err := r.run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Sent != 1 {
+		t.Fatalf("custom WARN should send: %+v", stats)
+	}
+	recs, err := models.BalanceAlertRecordGets(n9e, "ba1", "", "", 10)
+	if err != nil || len(recs) != 1 || recs[0].Level != StateWarn {
+		t.Fatalf("want WARN record: %+v err=%v", recs, err)
+	}
+
+	r.Store = fakeStore{accts: []Account{
+		{ID: "ba1", Name: "数商云", Balance: 8, HasVoucher: true},
+	}}
+	r.Now = func() time.Time { return now.Add(24 * time.Hour) }
+	stats, err = r.run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Sent != 1 {
+		t.Fatalf("platform CRITICAL should still send: %+v", stats)
+	}
+	recs, err = models.BalanceAlertRecordGets(n9e, "ba1", StateCritical, "", 10)
+	if err != nil || len(recs) == 0 {
+		t.Fatalf("want CRITICAL: %+v err=%v", recs, err)
+	}
+}
+
+func TestRunnerWarnDisabledStillSendsCritical(t *testing.T) {
+	n9e := testRunnerCtx(t)
+	s := models.DefaultBalanceAlertSettings()
+	s.SendMode = SendModeOff
+	if err := models.BalanceAlertSettingsPut(n9e, s, "root"); err != nil {
+		t.Fatal(err)
+	}
+	if err := models.BalanceAlertConfigUpsert(n9e, &models.BalanceAlertConfig{
+		BillingAccountID: "ba1",
+		Enabled:          false,
+		CurrentState:     StateNormal,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := models.BalanceAlertConfigGet(n9e, "ba1")
+	if err != nil || got == nil || got.Enabled {
+		t.Fatalf("precondition enabled=false: %+v err=%v", got, err)
+	}
+	now := time.Date(2026, 9, 21, 10, 0, 0, 0, locShanghai)
+	r := &Runner{
+		Ctx: n9e,
+		Store: fakeStore{accts: []Account{
+			{ID: "ba1", Name: "数商云", Balance: 15, HasVoucher: true},
+		}},
+		Now: func() time.Time { return now },
+	}
+	stats, err := r.run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Sent != 0 {
+		t.Fatalf("WARN off must not send at 15: %+v", stats)
+	}
+	cfg, _ := models.BalanceAlertConfigGet(n9e, "ba1")
+	if cfg == nil || cfg.CurrentState != StateWarn {
+		t.Fatalf("should track WARN state: %+v", cfg)
+	}
+
+	r.Store = fakeStore{accts: []Account{
+		{ID: "ba1", Name: "数商云", Balance: 8, HasVoucher: true},
+	}}
+	stats, err = r.run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Sent != 1 {
+		t.Fatalf("CRITICAL must send when WARN is off: %+v", stats)
+	}
+}
+
+func TestRunnerCustomerUsesConfiguredReceivers(t *testing.T) {
+	n9e := testRunnerCtx(t)
+	s := models.DefaultBalanceAlertSettings()
+	s.SendMode = SendModeCustomer
+	s.SmsWebhook = "https://sms.example/send"
+	if err := models.BalanceAlertSettingsPut(n9e, s, "root"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &models.BalanceAlertConfig{
+		BillingAccountID: "ba1",
+		Enabled:          true,
+		CurrentState:     StateNormal,
+	}
+	cfg.SetReceiverList([]string{"13900000000"})
+	if err := models.BalanceAlertConfigUpsert(n9e, cfg); err != nil {
+		t.Fatal(err)
+	}
+	httpClient := &fakeHTTP{}
+	r := &Runner{
+		Ctx: n9e,
+		Store: fakeStore{accts: []Account{
+			{ID: "ba1", Name: "数商云", Balance: 15, HasVoucher: true, Phone: "13800000000"},
+		}},
+		HTTP:   httpClient,
+		Sender: HTTPSender{HTTP: httpClient},
+		Now:    func() time.Time { return time.Date(2026, 9, 21, 10, 0, 0, 0, locShanghai) },
+	}
+	stats, err := r.run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Sent != 1 || len(httpClient.urls) != 1 {
+		t.Fatalf("send: %+v urls=%v", stats, httpClient.urls)
+	}
+	payload, _ := httpClient.payloads[0].(map[string]string)
+	if payload["phone"] != "13900000000" {
+		t.Fatalf("receiver payload: %+v", httpClient.payloads[0])
+	}
+}
+
+func TestRunnerSurgeIndependentDailyCap(t *testing.T) {
+	n9e := testRunnerCtx(t)
+	s := models.DefaultBalanceAlertSettings()
+	s.SendMode = SendModeOff
+	if err := models.BalanceAlertSettingsPut(n9e, s, "root"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 21, 10, 0, 0, 0, locShanghai)
+	r := &Runner{
+		Ctx: n9e,
+		Store: fakeStore{
+			accts: []Account{
+				{ID: "ba1", Name: "数商云", Balance: 1000, LastRecharge: recharge(1000)},
+			},
+			consumption: []Consumption{{AccountID: "ba1", Amount7D: 70, Amount3D: 30, AmountToday: 40}},
+		},
+		Now: func() time.Time { return now },
+	}
+	stats, err := r.run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Sent != 1 {
+		t.Fatalf("surge should send: %+v", stats)
+	}
+	recs, err := models.BalanceAlertRecordGets(n9e, "ba1", "", "", 10)
+	if err != nil || len(recs) != 1 || recs[0].TriggerType != models.TriggerTypeSurge {
+		t.Fatalf("want SURGE record: %+v err=%v", recs, err)
+	}
+	stats, err = r.run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Sent != 0 || stats.Cooldown != 1 {
+		t.Fatalf("same-day surge cooldown: %+v", stats)
+	}
+}

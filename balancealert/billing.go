@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ccfos/nightingale/v6/datasource/postgresql"
 	"github.com/ccfos/nightingale/v6/models"
@@ -24,9 +25,10 @@ SELECT
   COALESCE(w.balance_usd, 0) AS balance_usd,
   lr.amount_usd AS last_recharge_usd,
   (v.billing_account_id IS NOT NULL) AS has_voucher,
-  COALESCE(u.phone, '') AS phone
+  COALESCE(u.phone, '') AS phone,
+  p.created_at
 FROM (
-  SELECT a.id, a.name, a.enterprise_name, a.owner_user_id
+  SELECT a.id, a.name, a.enterprise_name, a.owner_user_id, a.created_at
   FROM billing_accounts a
   WHERE a.type = 'enterprise'
     AND a.status = 'active'
@@ -64,7 +66,8 @@ const ConsumptionSelectSQL = `
 SELECT
   billing_account_id,
   COALESCE(SUM(CASE WHEN created_at >= now() - INTERVAL '7 days' THEN amount_usd ELSE 0 END), 0) AS amount_7d,
-  COALESCE(SUM(CASE WHEN created_at >= now() - INTERVAL '3 days' THEN amount_usd ELSE 0 END), 0) AS amount_3d
+  COALESCE(SUM(CASE WHEN created_at >= now() - INTERVAL '3 days' THEN amount_usd ELSE 0 END), 0) AS amount_3d,
+  COALESCE(SUM(CASE WHEN (created_at AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date THEN amount_usd ELSE 0 END), 0) AS amount_today
 FROM balance_transactions
 WHERE type = 'CONSUME'
   AND created_at >= now() - INTERVAL '7 days'
@@ -78,6 +81,7 @@ type Account struct {
 	LastRecharge *float64
 	HasVoucher   bool
 	Phone        string
+	CreatedAt    time.Time
 }
 
 // ResolveAccountByEmailOrPhoneSQL finds the enterprise billing account owned by
@@ -87,11 +91,25 @@ const ResolveAccountByEmailOrPhoneSQL = `
 SELECT a.id,
        COALESCE(NULLIF(a.enterprise_name, ''), a.name, a.id) AS name,
        COALESCE(w.balance_usd, 0) AS balance_usd,
-       COALESCE(u.phone, '') AS phone
+       COALESCE(u.phone, '') AS phone,
+       lr.amount_usd AS last_recharge_usd,
+       (v.billing_account_id IS NOT NULL) AS has_voucher
 FROM users u
 JOIN billing_accounts a ON a.owner_user_id = u.id
   AND a.type = 'enterprise' AND a.status = 'active' AND a.deleted_at IS NULL
 LEFT JOIN account_wallets w ON w.billing_account_id = a.id
+LEFT JOIN (
+  SELECT DISTINCT ON (billing_account_id)
+         billing_account_id, amount_usd
+  FROM balance_transactions
+  WHERE type = 'RECHARGE'
+  ORDER BY billing_account_id, created_at DESC
+) lr ON lr.billing_account_id = a.id
+LEFT JOIN (
+  SELECT DISTINCT billing_account_id
+  FROM balance_transactions
+  WHERE type = 'ADJUST' AND description LIKE 'voucher:%'
+) v ON v.billing_account_id = a.id
 WHERE u.deleted_at IS NULL
   AND (
     (? <> '' AND LOWER(TRIM(COALESCE(u.email, ''))) = ?)
@@ -101,10 +119,12 @@ LIMIT 1
 `
 
 type MyAccount struct {
-	ID      string
-	Name    string
-	Balance float64
-	Phone   string
+	ID           string
+	Name         string
+	Balance      float64
+	Phone        string
+	LastRecharge *float64
+	HasVoucher   bool
 }
 
 type Store interface {
@@ -139,12 +159,16 @@ func (s *PGStore) ListPrepaid(ctx context.Context) ([]Account, error) {
 	for rows.Next() {
 		var a Account
 		var last sql.NullFloat64
-		if err := rows.Scan(&a.ID, &a.Name, &a.Balance, &last, &a.HasVoucher, &a.Phone); err != nil {
+		var created sql.NullTime
+		if err := rows.Scan(&a.ID, &a.Name, &a.Balance, &last, &a.HasVoucher, &a.Phone, &created); err != nil {
 			return nil, err
 		}
 		if last.Valid {
 			v := last.Float64
 			a.LastRecharge = &v
+		}
+		if created.Valid {
+			a.CreatedAt = created.Time
 		}
 		out = append(out, a)
 	}
@@ -161,7 +185,7 @@ func (s *PGStore) ListConsumption(ctx context.Context) ([]Consumption, error) {
 	var out []Consumption
 	for rows.Next() {
 		var c Consumption
-		if err := rows.Scan(&c.AccountID, &c.Amount7D, &c.Amount3D); err != nil {
+		if err := rows.Scan(&c.AccountID, &c.Amount7D, &c.Amount3D, &c.AmountToday); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -176,8 +200,9 @@ func (s *PGStore) ResolveAccountByEmailOrPhone(ctx context.Context, email, phone
 		return nil, nil
 	}
 	var a MyAccount
+	var last sql.NullFloat64
 	row := s.db.WithContext(ctx).Raw(ResolveAccountByEmailOrPhoneSQL, email, email, phone, phone).Row()
-	err := row.Scan(&a.ID, &a.Name, &a.Balance, &a.Phone)
+	err := row.Scan(&a.ID, &a.Name, &a.Balance, &a.Phone, &last, &a.HasVoucher)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -186,6 +211,10 @@ func (s *PGStore) ResolveAccountByEmailOrPhone(ctx context.Context, email, phone
 	}
 	if a.ID == "" {
 		return nil, nil
+	}
+	if last.Valid {
+		v := last.Float64
+		a.LastRecharge = &v
 	}
 	return &a, nil
 }

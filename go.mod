@@ -83,7 +83,10 @@ require (
 	go.opentelemetry.io/otel/trace v1.39.0 // indirect
 )
 
-require github.com/alecthomas/units v0.0.0-20231202071711-9a357b53e9c9
+require (
+	github.com/Authing/authing-golang-sdk/v3 v3.0.19
+	github.com/alecthomas/units v0.0.0-20231202071711-9a357b53e9c9
+)
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
@@ -91,6 +94,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.4.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.5.0 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.1.1 // indirect
+	github.com/MicahParks/compatibility-keyfunc v0.14.0 // indirect
 	github.com/VictoriaMetrics/metrics v1.34.0 // indirect
 	github.com/alibabacloud-go/alibabacloud-gateway-spi v0.0.5 // indirect
 	github.com/alibabacloud-go/debug v1.0.1 // indirect
@@ -107,11 +111,13 @@ require (
 	github.com/elastic/elastic-transport-go/v8 v8.9.0 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.36.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.0 // indirect
+	github.com/form3tech-oss/jwt-go v3.2.5+incompatible // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
+	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
@@ -136,6 +142,8 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
+	github.com/valyala/bytebufferpool v1.0.0 // indirect
+	github.com/valyala/fasthttp v1.36.0 // indirect
 	github.com/valyala/fastrand v1.1.0 // indirect
 	github.com/valyala/histogram v1.2.0 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect

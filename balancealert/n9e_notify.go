@@ -96,11 +96,11 @@ func (s *N9eNotifySender) Send(req SendRequest) SendResult {
 			continue
 		}
 
-		// CUSTOMER SMS: inject billing owner phone as sendto when the channel
-		// expects user contact phones and the rule did not resolve any.
-		if req.Mode == SendModeCustomer && strings.TrimSpace(req.Phone) != "" {
-			if len(ncCtx.Request.Sendtos) == 0 {
-				ncCtx.Request.Sendtos = []string{strings.TrimSpace(req.Phone)}
+		// CUSTOMER SMS: always use enterprise receivers (or owner phone).
+		if req.Mode == SendModeCustomer {
+			phones := requestPhones(req)
+			if len(phones) > 0 {
+				ncCtx.Request.Sendtos = phones
 			}
 		}
 

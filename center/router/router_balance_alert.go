@@ -1,11 +1,14 @@
 package router
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ccfos/nightingale/v6/balancealert"
 	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/authing"
 	"github.com/ccfos/nightingale/v6/pkg/ginx"
 
 	"github.com/gin-gonic/gin"
@@ -82,6 +85,7 @@ func (rt *Router) balanceAlertConfigGet(c *gin.Context) {
 func (rt *Router) balanceAlertConfigPut(c *gin.Context) {
 	accountID := ginx.UrlParamStr(c, "account_id")
 	var body struct {
+		Enabled           *bool    `json:"enabled"`
 		ThresholdMode     string   `json:"threshold_mode"`
 		ThresholdFixedUSD float64  `json:"threshold_fixed_usd"`
 		Receivers         []string `json:"receivers"`
@@ -99,7 +103,21 @@ func (rt *Router) balanceAlertConfigPut(c *gin.Context) {
 		ginx.Bomb(400, "threshold_fixed_usd must be > 0 when threshold_mode is CUSTOM")
 	}
 
+	existing, err := models.BalanceAlertConfigGet(rt.Ctx, accountID)
+	if err != nil {
+		ginx.NewRender(c).Message(err)
+		return
+	}
+	enabled := true
+	if existing != nil {
+		enabled = existing.Enabled
+	}
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+
 	cfg := models.BalanceAlertConfig{
+		Enabled:           enabled,
 		ThresholdMode:     body.ThresholdMode,
 		ThresholdFixedUSD: body.ThresholdFixedUSD,
 		DynamicEnabled:    body.DynamicEnabled,
@@ -178,18 +196,22 @@ func (rt *Router) balanceAlertMyConfigGet(c *gin.Context) {
 		return
 	}
 	out := map[string]interface{}{
-		"billing_account_id":  acc.ID,
-		"enterprise_name":     acc.Name,
-		"current_phone":       acc.Phone,
-		"balance_usd":         acc.Balance,
-		"threshold_mode":      models.ThresholdModeAuto,
-		"threshold_fixed_usd": float64(0),
-		"threshold_usd":       float64(0),
-		"receivers":           []string{},
-		"dynamic_enabled":     false,
-		"current_state":       models.BalanceAlertStateNormal,
+		"billing_account_id":      acc.ID,
+		"enterprise_name":         acc.Name,
+		"current_phone":           acc.Phone,
+		"balance_usd":             acc.Balance,
+		"enabled":                 true,
+		"threshold_mode":          models.ThresholdModeAuto,
+		"threshold_fixed_usd":     float64(0),
+		"threshold_usd":           float64(0),
+		"platform_threshold_usd":  float64(0),
+		"platform_threshold_mode": "",
+		"receivers":               []string{},
+		"dynamic_enabled":         false,
+		"current_state":           models.BalanceAlertStateNormal,
 	}
 	if cfg != nil {
+		out["enabled"] = cfg.Enabled
 		out["threshold_mode"] = cfg.ThresholdMode
 		out["threshold_fixed_usd"] = cfg.ThresholdFixedUSD
 		out["receivers"] = cfg.ReceiverList()
@@ -197,9 +219,16 @@ func (rt *Router) balanceAlertMyConfigGet(c *gin.Context) {
 		out["current_state"] = cfg.CurrentState
 	}
 	settings, _ := models.BalanceAlertSettingsGet(rt.Ctx)
-	out["threshold_usd"] = settings.VoucherThresholdUSD
+	platformTh, platformMode, _ := balancealert.ComputeThreshold(acc.LastRecharge, acc.HasVoucher, settings.VoucherThresholdUSD)
+	out["platform_threshold_usd"] = platformTh
+	out["platform_threshold_mode"] = platformMode
+	out["threshold_usd"] = platformTh
 	if cfg != nil && cfg.IsCustomThreshold() {
 		out["threshold_usd"] = cfg.ThresholdFixedUSD
+	}
+	receivers, _ := out["receivers"].([]string)
+	if len(receivers) == 0 && strings.TrimSpace(acc.Phone) != "" {
+		out["receivers"] = []string{strings.TrimSpace(acc.Phone)}
 	}
 	ginx.NewRender(c).Data(out, nil)
 }
@@ -215,6 +244,7 @@ func (rt *Router) balanceAlertMyConfigPut(c *gin.Context) {
 		return
 	}
 	var body struct {
+		Enabled           *bool    `json:"enabled"`
 		ThresholdMode     string   `json:"threshold_mode"`
 		ThresholdFixedUSD float64  `json:"threshold_fixed_usd"`
 		Receivers         []string `json:"receivers"`
@@ -233,7 +263,19 @@ func (rt *Router) balanceAlertMyConfigPut(c *gin.Context) {
 		ginx.NewRender(c).Message("自定义警戒线金额必须大于 0")
 		return
 	}
-	if len(body.Receivers) > 5 {
+	if body.ThresholdMode == models.ThresholdModeCustom {
+		settings, err := models.BalanceAlertSettingsGet(rt.Ctx)
+		if err != nil {
+			ginx.NewRender(c).Message(err)
+			return
+		}
+		platformTh, _, skip := balancealert.ComputeThreshold(acc.LastRecharge, acc.HasVoucher, settings.VoucherThresholdUSD)
+		if !skip && platformTh > 0 && body.ThresholdFixedUSD <= platformTh {
+			ginx.NewRender(c).Message(fmt.Sprintf("自定义警戒线必须高于平台默认线（当前 %.2f 元）", platformTh))
+			return
+		}
+	}
+	if len(body.Receivers) > models.MaxBalanceAlertReceivers {
 		ginx.NewRender(c).Message("接收手机号最多 5 个")
 		return
 	}
@@ -251,7 +293,39 @@ func (rt *Router) balanceAlertMyConfigPut(c *gin.Context) {
 		}
 	}
 
+	existing, err := models.BalanceAlertConfigGet(rt.Ctx, acc.ID)
+	if err != nil {
+		ginx.NewRender(c).Message(err)
+		return
+	}
+	enabled := true
+	oldPhones := map[string]struct{}{}
+	if existing != nil {
+		enabled = existing.Enabled
+		for _, p := range existing.ReceiverList() {
+			oldPhones[p] = struct{}{}
+		}
+	}
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+	owner := strings.TrimSpace(acc.Phone)
+	now := time.Now()
+	for _, p := range trimmed {
+		if _, ok := oldPhones[p]; ok {
+			continue
+		}
+		if p == owner {
+			continue
+		}
+		if !models.BalanceAlertOTPVerified(rt.Ctx, acc.ID, p, now) {
+			ginx.NewRender(c).Message("新增手机号需先完成短信验证：" + p)
+			return
+		}
+	}
+
 	cfg := models.BalanceAlertConfig{
+		Enabled:           enabled,
 		ThresholdMode:     body.ThresholdMode,
 		ThresholdFixedUSD: body.ThresholdFixedUSD,
 		DynamicEnabled:    body.DynamicEnabled,
@@ -296,23 +370,101 @@ func (rt *Router) balanceAlertMyStatusGet(c *gin.Context) {
 		return
 	}
 	out := map[string]interface{}{
-		"balance_usd":     acc.Balance,
-		"current_state":   models.BalanceAlertStateNormal,
-		"threshold_mode":  models.ThresholdModeAuto,
-		"threshold_usd":   0,
-		"dynamic_enabled": false,
-		"last_alert_at":   nil,
+		"balance_usd":            acc.Balance,
+		"current_state":          models.BalanceAlertStateNormal,
+		"enabled":                true,
+		"threshold_mode":         models.ThresholdModeAuto,
+		"threshold_usd":          0,
+		"platform_threshold_usd": 0,
+		"dynamic_enabled":        false,
+		"last_alert_at":          nil,
 	}
 	if cfg != nil {
 		out["current_state"] = cfg.CurrentState
+		out["enabled"] = cfg.Enabled
 		out["threshold_mode"] = cfg.ThresholdMode
 		out["dynamic_enabled"] = cfg.DynamicEnabled
 		out["last_alert_at"] = cfg.LastAlertAt
 	}
 	settings, _ := models.BalanceAlertSettingsGet(rt.Ctx)
-	out["threshold_usd"] = settings.VoucherThresholdUSD
+	platformTh, _, _ := balancealert.ComputeThreshold(acc.LastRecharge, acc.HasVoucher, settings.VoucherThresholdUSD)
+	out["platform_threshold_usd"] = platformTh
+	out["threshold_usd"] = platformTh
 	if cfg != nil && cfg.IsCustomThreshold() {
 		out["threshold_usd"] = cfg.ThresholdFixedUSD
 	}
 	ginx.NewRender(c).Data(out, nil)
+}
+
+func (rt *Router) balanceAlertMyOTPSend(c *gin.Context) {
+	acc, reason, err := rt.resolveMyBillingAccount(c)
+	if err != nil {
+		ginx.NewRender(c).Data(nil, err)
+		return
+	}
+	if acc == nil {
+		ginx.NewRender(c).Message(myAccountMissingMsg(reason))
+		return
+	}
+	var body struct {
+		Phone string `json:"phone"`
+	}
+	ginx.BindJSON(c, &body)
+	phone := strings.TrimSpace(body.Phone)
+	if !phoneRe.MatchString(phone) {
+		ginx.NewRender(c).Message("手机号格式不正确")
+		return
+	}
+	if err := models.BalanceAlertOTPBegin(rt.Ctx, acc.ID, phone, time.Now()); err != nil {
+		ginx.NewRender(c).Message(err.Error())
+		return
+	}
+	if rt.AuthingOTP == nil {
+		ginx.NewRender(c).Message(authing.ErrNotConfigured.Error())
+		return
+	}
+	if err := rt.AuthingOTP.SendLoginSMS(phone); err != nil {
+		ginx.NewRender(c).Message(err.Error())
+		return
+	}
+	ginx.NewRender(c).Message("")
+}
+
+func (rt *Router) balanceAlertMyOTPVerify(c *gin.Context) {
+	acc, reason, err := rt.resolveMyBillingAccount(c)
+	if err != nil {
+		ginx.NewRender(c).Data(nil, err)
+		return
+	}
+	if acc == nil {
+		ginx.NewRender(c).Message(myAccountMissingMsg(reason))
+		return
+	}
+	var body struct {
+		Phone string `json:"phone"`
+		Code  string `json:"code"`
+	}
+	ginx.BindJSON(c, &body)
+	phone := strings.TrimSpace(body.Phone)
+	if !phoneRe.MatchString(phone) {
+		ginx.NewRender(c).Message("手机号格式不正确")
+		return
+	}
+	if strings.TrimSpace(body.Code) == "" {
+		ginx.NewRender(c).Message("请输入验证码")
+		return
+	}
+	if rt.AuthingOTP == nil {
+		ginx.NewRender(c).Message(authing.ErrNotConfigured.Error())
+		return
+	}
+	if err := rt.AuthingOTP.VerifyPhoneCode(phone, body.Code); err != nil {
+		ginx.NewRender(c).Message(err.Error())
+		return
+	}
+	if err := models.BalanceAlertOTPMarkVerified(rt.Ctx, acc.ID, phone, time.Now()); err != nil {
+		ginx.NewRender(c).Message(err.Error())
+		return
+	}
+	ginx.NewRender(c).Message("")
 }

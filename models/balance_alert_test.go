@@ -29,13 +29,17 @@ func TestBalanceAlertSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get default: %v", err)
 	}
-	if got.SendMode != "OFF" || got.VoucherThresholdUSD != 20 {
+	if got.SendMode != "OFF" || got.VoucherThresholdUSD != 20 || got.CriticalRepeatDays != 3 {
 		t.Fatalf("defaults: %+v", got)
+	}
+	if got.CriticalRepeatAfter() != 72*time.Hour {
+		t.Fatalf("default repeat: %s", got.CriticalRepeatAfter())
 	}
 
 	got.SendMode = "PILOT"
 	got.PilotReceivers = []string{"dingtalk:ops"}
 	got.DatasourceID = 2
+	got.CriticalRepeatDays = 5
 	if err := BalanceAlertSettingsPut(c, got, "root"); err != nil {
 		t.Fatalf("put: %v", err)
 	}
@@ -43,8 +47,23 @@ func TestBalanceAlertSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.SendMode != "PILOT" || got.DatasourceID != 2 || len(got.PilotReceivers) != 1 {
+	if got.SendMode != "PILOT" || got.DatasourceID != 2 || len(got.PilotReceivers) != 1 || got.CriticalRepeatDays != 5 {
 		t.Fatalf("saved: %+v", got)
+	}
+	if got.CriticalRepeatAfter() != 5*24*time.Hour {
+		t.Fatalf("saved repeat: %s", got.CriticalRepeatAfter())
+	}
+
+	got.CriticalRepeatDays = 0
+	if err := BalanceAlertSettingsPut(c, got, "root"); err != nil {
+		t.Fatalf("put zero days: %v", err)
+	}
+	got, err = BalanceAlertSettingsGet(c)
+	if err != nil {
+		t.Fatalf("get after zero: %v", err)
+	}
+	if got.CriticalRepeatDays != 3 {
+		t.Fatalf("zero days should default to 3: %+v", got)
 	}
 
 	pub := got.Public()
@@ -101,5 +120,25 @@ func TestBalanceAlertConfigAndRecord(t *testing.T) {
 	ok, err := BalanceAlertRecordSentToday(c, "acct-1", BalanceAlertStateWarn, dayStart)
 	if err != nil || !ok {
 		t.Fatalf("sent today: %v err=%v", ok, err)
+	}
+}
+
+func TestBalanceAlertOTPRoundTrip(t *testing.T) {
+	c := testBalanceAlertCtx(t)
+	now := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
+	if err := BalanceAlertOTPBegin(c, "acct-1", "13900000000", now); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if err := BalanceAlertOTPBegin(c, "acct-1", "13900000000", now.Add(10*time.Second)); err == nil {
+		t.Fatal("expected rate limit")
+	}
+	if err := BalanceAlertOTPMarkVerified(c, "acct-1", "13900000000", now.Add(time.Minute)); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	if !BalanceAlertOTPVerified(c, "acct-1", "13900000000", now.Add(time.Minute)) {
+		t.Fatal("expected verified")
+	}
+	if BalanceAlertOTPVerified(c, "acct-1", "13900000000", now.Add(10*time.Minute)) {
+		t.Fatal("expired should not stay verified")
 	}
 }

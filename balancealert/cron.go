@@ -37,6 +37,23 @@ func StartCron(n9e *ctx.Context) {
 		return
 	}
 
+	_, err = c.AddFunc("5 8 * * *", func() {
+		res, err := ReconMissReports(n9e, 7)
+		if err != nil {
+			logger.Errorf("balancealert miss-report cron: %v", err)
+			return
+		}
+		logger.Infof("balancealert miss-report cron: scanned=%d misses=%d", res.PrepaidScanned, len(res.Misses))
+		for _, m := range res.Misses {
+			logger.Warningf("balancealert miss-report: account=%s name=%s balance=%.2f reason=%s",
+				m.BillingAccountID, m.Name, m.BalanceUSD, m.Reason)
+		}
+	})
+	if err != nil {
+		logger.Errorf("balancealert miss-report cron schedule: %v", err)
+		return
+	}
+
 	c.Start()
-	logger.Info("balancealert cron started (static: every 15 minutes, dynamic: daily at 10:00)")
+	logger.Info("balancealert cron started (static: every 15 minutes, dynamic: daily at 10:00, miss-report: daily at 08:05)")
 }

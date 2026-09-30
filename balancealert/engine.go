@@ -22,7 +22,7 @@ const (
 	HysteresisFactor        = 1.5
 	CriticalHalfFactor      = 0.5
 	LastRechargePct         = 0.05
-	CriticalRepeatAfter     = 72 * time.Hour
+	DefaultCriticalRepeat   = 72 * time.Hour
 )
 
 var locShanghai = mustLoadShanghai()
@@ -46,11 +46,28 @@ func ComputeThreshold(lastRechargeUSD *float64, hasVoucher bool, voucherThreshol
 	return 0, "", true
 }
 
+func startOfShanghaiDay(now time.Time) time.Time {
+	y, m, d := now.In(locShanghai).Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, locShanghai)
+}
+
 func DesiredLevel(balance, threshold float64) string {
-	if balance <= 0 || balance < threshold*CriticalHalfFactor {
+	return DesiredLevelWith(balance, threshold, threshold)
+}
+
+// DesiredLevelWith splits WARN and CRITICAL lines. PRD 10.1: custom 警戒线
+// only affects WARN; CRITICAL always uses the platform default line (half / <= 0).
+func DesiredLevelWith(balance, warnTh, platformTh float64) string {
+	if platformTh <= 0 {
+		platformTh = warnTh
+	}
+	if warnTh <= 0 {
+		warnTh = platformTh
+	}
+	if balance <= 0 || (platformTh > 0 && balance < platformTh*CriticalHalfFactor) {
 		return StateCritical
 	}
-	if balance < threshold {
+	if warnTh > 0 && balance < warnTh {
 		return StateWarn
 	}
 	return StateNormal
@@ -82,25 +99,49 @@ func canSendToday(last time.Time, now time.Time) bool {
 	return !sameCivilDay(last, now)
 }
 
-// Decide implements FR-03 debounce: hysteresis, daily cap, CRITICAL 3-day repeat.
-func Decide(current string, balance, threshold float64, now time.Time, hist SendHistory) Decision {
+// Decide implements FR-03 debounce: hysteresis, daily cap, CRITICAL repeat.
+// repeatAfter is the CRITICAL re-notify interval; zero uses DefaultCriticalRepeat (3 days).
+func Decide(current string, balance, threshold float64, now time.Time, hist SendHistory, repeatAfter time.Duration) Decision {
+	return DecideWith(current, balance, threshold, threshold, now, hist, repeatAfter, true)
+}
+
+// DecideWith is Decide plus PRD 10.1: warnTh may be a higher enterprise line;
+// platformTh is always the auto line used for CRITICAL. warnEnabled=false
+// suppresses WARN sends but never CRITICAL.
+func DecideWith(current string, balance, warnTh, platformTh float64, now time.Time, hist SendHistory, repeatAfter time.Duration, warnEnabled bool) Decision {
+	if repeatAfter <= 0 {
+		repeatAfter = DefaultCriticalRepeat
+	}
 	if current == "" {
 		current = StateNormal
 	}
-	if threshold <= 0 {
+	if platformTh <= 0 {
+		platformTh = warnTh
+	}
+	if warnTh <= 0 {
+		warnTh = platformTh
+	}
+	if warnTh <= 0 && platformTh <= 0 {
 		return Decision{NextState: current}
 	}
 
-	if balance >= threshold*HysteresisFactor {
+	recoverTh := warnTh
+	if recoverTh <= 0 {
+		recoverTh = platformTh
+	}
+	if recoverTh > 0 && balance >= recoverTh*HysteresisFactor {
 		return Decision{NextState: StateNormal}
 	}
 
-	desired := DesiredLevel(balance, threshold)
+	desired := DesiredLevelWith(balance, warnTh, platformTh)
 
 	switch current {
 	case StateNormal:
 		if desired == StateNormal {
 			return Decision{NextState: StateNormal}
+		}
+		if desired == StateWarn && !warnEnabled {
+			return Decision{NextState: StateWarn}
 		}
 		return sendOrSkip(desired, now, hist)
 	case StateWarn:
@@ -110,7 +151,7 @@ func Decide(current string, balance, threshold float64, now time.Time, hist Send
 		return Decision{NextState: StateWarn}
 	default:
 		if desired == StateCritical || current == StateCritical {
-			if canSendToday(hist.CriticalAt, now) && (hist.CriticalAt.IsZero() || now.Sub(hist.CriticalAt) >= CriticalRepeatAfter) {
+			if canSendToday(hist.CriticalAt, now) && (hist.CriticalAt.IsZero() || now.Sub(hist.CriticalAt) >= repeatAfter) {
 				return Decision{NextState: StateCritical, SendLevel: StateCritical, Status: StatusSent}
 			}
 			if !hist.CriticalAt.IsZero() && !canSendToday(hist.CriticalAt, now) {

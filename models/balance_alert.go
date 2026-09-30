@@ -17,25 +17,29 @@ const (
 	BalanceAlertStateWarn     = "WARN"
 	BalanceAlertStateCritical = "CRITICAL"
 
-	ThresholdModeAuto  = "AUTO"
+	ThresholdModeAuto   = "AUTO"
 	ThresholdModeCustom = "CUSTOM"
 
 	TriggerTypeStatic  = "STATIC"
 	TriggerTypeDynamic = "DYNAMIC"
+	TriggerTypeSurge   = "SURGE"
+
+	DefaultCriticalRepeatDays = 3
+	MaxBalanceAlertReceivers  = 5
 )
 
 type BalanceAlertConfig struct {
-	BillingAccountID string     `json:"billing_account_id" gorm:"primaryKey;type:varchar(128)"`
-	Enabled          bool       `json:"enabled" gorm:"not null;default:true"`
-	CurrentState     string     `json:"current_state" gorm:"type:varchar(16);not null;default:NORMAL"`
-	StateSince       *time.Time `json:"state_since"`
-	LastAlertAt      *time.Time `json:"last_alert_at"`
-	ThresholdMode    string     `json:"threshold_mode" gorm:"type:varchar(16);not null;default:AUTO"`
-	ThresholdFixedUSD float64   `json:"threshold_fixed_usd" gorm:"type:numeric;not null;default:0"`
-	Receivers        string     `json:"receivers" gorm:"type:text"`
-	DynamicEnabled   bool       `json:"dynamic_enabled" gorm:"not null;default:false"`
-	CreatedAt        time.Time  `json:"created_at" gorm:"not null"`
-	UpdatedAt        time.Time  `json:"updated_at" gorm:"not null"`
+	BillingAccountID  string     `json:"billing_account_id" gorm:"primaryKey;type:varchar(128)"`
+	Enabled           bool       `json:"enabled" gorm:"column:enabled;not null"`
+	CurrentState      string     `json:"current_state" gorm:"type:varchar(16);not null;default:NORMAL"`
+	StateSince        *time.Time `json:"state_since"`
+	LastAlertAt       *time.Time `json:"last_alert_at"`
+	ThresholdMode     string     `json:"threshold_mode" gorm:"type:varchar(16);not null;default:AUTO"`
+	ThresholdFixedUSD float64    `json:"threshold_fixed_usd" gorm:"type:numeric;not null;default:0"`
+	Receivers         string     `json:"receivers" gorm:"type:text"`
+	DynamicEnabled    bool       `json:"dynamic_enabled" gorm:"not null;default:false"`
+	CreatedAt         time.Time  `json:"created_at" gorm:"not null"`
+	UpdatedAt         time.Time  `json:"updated_at" gorm:"not null"`
 }
 
 func (BalanceAlertConfig) TableName() string {
@@ -91,6 +95,7 @@ type BalanceAlertSettings struct {
 	SendMode             string   `json:"send_mode"`
 	PilotReceivers       []string `json:"pilot_receivers,omitempty"` // legacy; prefer PilotNotifyRuleID
 	VoucherThresholdUSD  float64  `json:"voucher_threshold_usd"`
+	CriticalRepeatDays   int      `json:"critical_repeat_days"`
 	DatasourceID         int64    `json:"datasource_id"`
 	SmsWebhook           string   `json:"sms_webhook,omitempty"` // legacy; prefer CustomerNotifyRuleID
 	CustomerPhoneSQLHint string   `json:"customer_phone_sql_hint,omitempty"`
@@ -104,7 +109,16 @@ func DefaultBalanceAlertSettings() BalanceAlertSettings {
 		SendMode:            "OFF",
 		PilotReceivers:      []string{},
 		VoucherThresholdUSD: 20,
+		CriticalRepeatDays:  DefaultCriticalRepeatDays,
 	}
+}
+
+func (s BalanceAlertSettings) CriticalRepeatAfter() time.Duration {
+	days := s.CriticalRepeatDays
+	if days <= 0 {
+		days = DefaultCriticalRepeatDays
+	}
+	return time.Duration(days) * 24 * time.Hour
 }
 
 func BalanceAlertSettingsGet(ctx *ctx.Context) (BalanceAlertSettings, error) {
@@ -124,6 +138,9 @@ func BalanceAlertSettingsGet(ctx *ctx.Context) (BalanceAlertSettings, error) {
 	}
 	if s.VoucherThresholdUSD <= 0 {
 		s.VoucherThresholdUSD = 20
+	}
+	if s.CriticalRepeatDays <= 0 {
+		s.CriticalRepeatDays = DefaultCriticalRepeatDays
 	}
 	if s.PilotReceivers == nil {
 		s.PilotReceivers = []string{}
@@ -145,6 +162,9 @@ func BalanceAlertSettingsPut(ctx *ctx.Context, s BalanceAlertSettings, username 
 	}
 	if s.VoucherThresholdUSD <= 0 {
 		s.VoucherThresholdUSD = 20
+	}
+	if s.CriticalRepeatDays <= 0 {
+		s.CriticalRepeatDays = DefaultCriticalRepeatDays
 	}
 	if s.PilotReceivers == nil {
 		s.PilotReceivers = []string{}
@@ -205,7 +225,8 @@ func BalanceAlertRecordInsert(ctx *ctx.Context, rec *BalanceAlertRecord) error {
 
 func BalanceAlertRecordLastSentAt(ctx *ctx.Context, accountID, level string) (time.Time, error) {
 	var rec BalanceAlertRecord
-	err := DB(ctx).Where("billing_account_id = ? AND level = ? AND status = ?", accountID, level, "SENT").
+	err := DB(ctx).Where("billing_account_id = ? AND level = ? AND status = ? AND trigger_type <> ?",
+		accountID, level, "SENT", TriggerTypeSurge).
 		Order("created_at desc").Limit(1).Take(&rec).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return time.Time{}, nil
@@ -222,7 +243,34 @@ func BalanceAlertRecordLastSentAt(ctx *ctx.Context, accountID, level string) (ti
 func BalanceAlertRecordSentToday(ctx *ctx.Context, accountID, level string, dayStart time.Time) (bool, error) {
 	var n int64
 	err := DB(ctx).Model(&BalanceAlertRecord{}).
-		Where("billing_account_id = ? AND level = ? AND status = ? AND created_at >= ?", accountID, level, "SENT", dayStart).
+		Where("billing_account_id = ? AND level = ? AND status = ? AND created_at >= ? AND trigger_type <> ?",
+			accountID, level, "SENT", dayStart, TriggerTypeSurge).
+		Count(&n).Error
+	return n > 0, err
+}
+
+func BalanceAlertRecordLastSentAtByTrigger(ctx *ctx.Context, accountID, triggerType string) (time.Time, error) {
+	var rec BalanceAlertRecord
+	err := DB(ctx).Where("billing_account_id = ? AND trigger_type = ? AND status = ?", accountID, triggerType, "SENT").
+		Order("created_at desc").Limit(1).Take(&rec).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	if rec.SentAt != nil {
+		return *rec.SentAt, nil
+	}
+	return rec.CreatedAt, nil
+}
+
+// BalanceAlertRecordSentTodayBalance is the shared STATIC+DYNAMIC daily cap (PRD 10.2).
+func BalanceAlertRecordSentTodayBalance(ctx *ctx.Context, accountID string, dayStart time.Time) (bool, error) {
+	var n int64
+	err := DB(ctx).Model(&BalanceAlertRecord{}).
+		Where("billing_account_id = ? AND status = ? AND created_at >= ? AND trigger_type IN (?, ?)",
+			accountID, "SENT", dayStart, TriggerTypeStatic, TriggerTypeDynamic).
 		Count(&n).Error
 	return n > 0, err
 }
@@ -284,10 +332,81 @@ func BalanceAlertConfigPut(ctx *ctx.Context, accountID string, cfg BalanceAlertC
 			CreatedAt:        now,
 		}
 	}
+	existing.Enabled = cfg.Enabled
 	existing.ThresholdMode = cfg.ThresholdMode
 	existing.ThresholdFixedUSD = cfg.ThresholdFixedUSD
 	existing.Receivers = cfg.Receivers
 	existing.DynamicEnabled = cfg.DynamicEnabled
 	existing.UpdatedAt = now
 	return DB(ctx).Save(existing).Error
+}
+
+const balanceAlertOTPKeyPrefix = "balance_alert_otp:"
+
+type balanceAlertOTPValue struct {
+	Phone     string    `json:"phone"`
+	IssuedAt  time.Time `json:"issued_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Verified  bool      `json:"verified"`
+}
+
+func balanceAlertOTPKey(accountID, phone string) string {
+	return balanceAlertOTPKeyPrefix + accountID + ":" + phone
+}
+
+func BalanceAlertOTPBegin(ctx *ctx.Context, accountID, phone string, now time.Time) error {
+	prev, _ := balanceAlertOTPGet(ctx, accountID, phone)
+	if prev != nil && !prev.IssuedAt.IsZero() && now.Sub(prev.IssuedAt) < time.Minute {
+		return errors.New("验证码发送过于频繁，请稍后再试")
+	}
+	val := balanceAlertOTPValue{
+		Phone:     phone,
+		IssuedAt:  now,
+		ExpiresAt: now.Add(5 * time.Minute),
+	}
+	b, err := json.Marshal(val)
+	if err != nil {
+		return err
+	}
+	return ConfigsSet(ctx, balanceAlertOTPKey(accountID, phone), string(b))
+}
+
+func balanceAlertOTPGet(ctx *ctx.Context, accountID, phone string) (*balanceAlertOTPValue, error) {
+	raw, err := ConfigsGet(ctx, balanceAlertOTPKey(accountID, phone))
+	if err != nil || raw == "" {
+		return nil, err
+	}
+	var val balanceAlertOTPValue
+	if err := json.Unmarshal([]byte(raw), &val); err != nil {
+		return nil, err
+	}
+	return &val, nil
+}
+
+func BalanceAlertOTPMarkVerified(ctx *ctx.Context, accountID, phone string, now time.Time) error {
+	val, err := balanceAlertOTPGet(ctx, accountID, phone)
+	if err != nil {
+		return err
+	}
+	if val == nil || val.IssuedAt.IsZero() {
+		return errors.New("请先获取验证码")
+	}
+	if now.After(val.ExpiresAt) {
+		return errors.New("验证码已过期，请重新获取")
+	}
+	val.Verified = true
+	val.ExpiresAt = now.Add(5 * time.Minute)
+	b, err := json.Marshal(val)
+	if err != nil {
+		return err
+	}
+	return ConfigsSet(ctx, balanceAlertOTPKey(accountID, phone), string(b))
+}
+
+func BalanceAlertOTPVerified(ctx *ctx.Context, accountID, phone string, now time.Time) bool {
+	val, err := balanceAlertOTPGet(ctx, accountID, phone)
+	if err != nil || val == nil || !val.Verified {
+		return false
+	}
+	return !now.After(val.ExpiresAt)
 }

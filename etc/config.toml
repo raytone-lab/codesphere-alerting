@@ -147,13 +147,14 @@ I18NHeaderKey = "X-Language"
 # serve frontend from ./pub (gitignored). needed so the pgsql/mysql datasource
 # forms from n9e/fe v9.1.1 are used instead of the older embedded bundle.
 UseFileAssets = true
-# directory holding the bundled collector packages (categraf tar.gz) served by
-# /api/n9e/agents/categraf/download; relative paths resolve against the workdir
-# AgentsDir = "agents/categraf"
-# retention days of alert history events (table: alert_his_event)
-# events older than this are deleted in batches daily at 02:00
-# <= 0 means keep forever (default)
-# CleanAlertHisEventDay = 365
+
+# 我的余额告警 OTP 走 Authing v3（与 codesphere-user 同一应用）。
+# AppSecret 只从本文件读取，不读环境变量。
+[Center.Authing]
+AppHost = "https://raytone.authing.cn"
+AppID = "6a277193f429081733904a7f"
+AppSecret = "b441c71fb844d9e45ec297a9cab88449"
+RedirectURI = "http://localhost:5173/auth-callback/authing"
 
 [Center.AnonymousAccess]
 PromQuerier = true

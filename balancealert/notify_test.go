@@ -26,6 +26,14 @@ func TestRenderCopy(t *testing.T) {
 	if dyn != "【签名】数商云您好，按当前消耗速度，您的账户余额仅剩3.5天，请及时充值以避免服务中断。" {
 		t.Fatalf("dynamic copy: %s", dyn)
 	}
+	surge := RenderCopy(SendRequest{Level: StateWarn, TriggerType: models.TriggerTypeSurge, Name: "数商云"})
+	if surge != "【签名】数商云您好，您今日用量异常升高，请关注账户余额以免服务中断。" {
+		t.Fatalf("surge copy: %s", surge)
+	}
+	otp := RenderCopy(SendRequest{CopyOverride: "【签名】验证码123456"})
+	if otp != "【签名】验证码123456" {
+		t.Fatalf("override copy: %s", otp)
+	}
 }
 
 func TestRenderPilotLine(t *testing.T) {

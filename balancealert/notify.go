@@ -28,6 +28,8 @@ type SendRequest struct {
 	Threshold     float64
 	DynamicDays   float64
 	Phone         string
+	Phones        []string
+	CopyOverride  string
 	NotifyRuleID  int64
 	// Legacy HTTP fallback fields (used when NotifyRuleID is unset).
 	PilotURLs []string
@@ -41,6 +43,9 @@ type SendResult struct {
 }
 
 func RenderCopy(req SendRequest) string {
+	if strings.TrimSpace(req.CopyOverride) != "" {
+		return strings.TrimSpace(req.CopyOverride)
+	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		name = req.AccountID
@@ -48,6 +53,8 @@ func RenderCopy(req SendRequest) string {
 	switch {
 	case req.TriggerType == models.TriggerTypeDynamic:
 		return fmt.Sprintf("【签名】%s您好，按当前消耗速度，您的账户余额仅剩%s，请及时充值以避免服务中断。", name, FormatRemainingDays(req.DynamicDays))
+	case req.TriggerType == models.TriggerTypeSurge:
+		return fmt.Sprintf("【签名】%s您好，您今日用量异常升高，请关注账户余额以免服务中断。", name)
 	case req.ThresholdMode == ModeVoucherFixed && req.Level != StateCritical:
 		return fmt.Sprintf("【签名】%s您好，您的体验额度即将用完，充值后可继续使用服务。", name)
 	case req.Level == StateCritical:
@@ -55,6 +62,31 @@ func RenderCopy(req SendRequest) string {
 	default:
 		return fmt.Sprintf("【签名】%s您好，您的账户余额为%.2f元，为避免影响业务调用请及时充值。", name, req.Balance)
 	}
+}
+
+func requestPhones(req SendRequest) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(raw string) {
+		p := strings.TrimSpace(raw)
+		if p == "" {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	for _, p := range req.Phones {
+		add(p)
+	}
+	if len(out) == 0 {
+		for _, p := range strings.Split(req.Phone, ",") {
+			add(p)
+		}
+	}
+	return out
 }
 
 func RenderPilotLine(name string, balance, threshold float64, level string) string {
@@ -202,18 +234,25 @@ func Dispatch(httpClient HTTPClient, req SendRequest) SendResult {
 		}
 		return SendResult{Channel: "DINGTALK", Receiver: strings.Join(receivers, ","), Err: lastErr}
 	case SendModeCustomer:
-		if strings.TrimSpace(req.Phone) == "" {
+		phones := requestPhones(req)
+		if len(phones) == 0 {
 			return SendResult{Channel: "SMS", Err: fmt.Errorf("empty customer phone")}
 		}
 		if strings.TrimSpace(req.SmsURL) == "" {
-			return SendResult{Channel: "SMS", Receiver: req.Phone, Err: fmt.Errorf("sms webhook not configured")}
+			return SendResult{Channel: "SMS", Receiver: strings.Join(phones, ","), Err: fmt.Errorf("sms webhook not configured")}
 		}
 		body := RenderCopy(req)
-		err := httpClient.PostJSON(req.SmsURL, map[string]string{
-			"phone":   req.Phone,
-			"content": body,
-		})
-		return SendResult{Channel: "SMS", Receiver: req.Phone, Err: err}
+		var lastErr error
+		for _, phone := range phones {
+			err := httpClient.PostJSON(req.SmsURL, map[string]string{
+				"phone":   phone,
+				"content": body,
+			})
+			if err != nil {
+				lastErr = err
+			}
+		}
+		return SendResult{Channel: "SMS", Receiver: strings.Join(phones, ","), Err: lastErr}
 	default:
 		return SendResult{Err: fmt.Errorf("unknown send_mode %s", req.Mode)}
 	}

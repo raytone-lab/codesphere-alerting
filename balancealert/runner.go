@@ -3,6 +3,7 @@ package balancealert
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -174,9 +175,6 @@ func (r *Runner) evalOne(acct Account, settings models.BalanceAlertSettings, con
 	if err != nil {
 		return err
 	}
-	if cfg != nil && !cfg.Enabled {
-		return nil
-	}
 	if cfg == nil {
 		cfg = &models.BalanceAlertConfig{
 			BillingAccountID: acct.ID,
@@ -186,32 +184,46 @@ func (r *Runner) evalOne(acct Account, settings models.BalanceAlertSettings, con
 		}
 	}
 
-	// Static threshold: custom overrides auto (PRD 10.1).
-	th, mode, skip := ComputeThreshold(acct.LastRecharge, acct.HasVoucher, settings.VoucherThresholdUSD)
+	platformTh, mode, skip := ComputeThreshold(acct.LastRecharge, acct.HasVoucher, settings.VoucherThresholdUSD)
+	warnTh := platformTh
 	if cfg.IsCustomThreshold() {
-		th = cfg.ThresholdFixedUSD
+		warnTh = cfg.ThresholdFixedUSD
 		mode = models.ThresholdModeCustom
 		skip = false
 	}
 
-	// Static evaluation (FR-02/FR-03).
 	if !skip {
-		if err := r.evalStatic(acct, cfg, th, mode, settings, now, snd, stats); err != nil {
+		if err := r.evalStatic(acct, cfg, warnTh, platformTh, mode, settings, now, snd, stats); err != nil {
 			return err
 		}
 	} else {
 		stats.SkippedIncome++
 	}
 
-	// Dynamic evaluation (PRD 10.2): independent of static, own state tracking.
-	if cfg.DynamicEnabled && consumption != nil {
+	if cfg.Enabled && cfg.DynamicEnabled && consumption != nil {
 		r.evalDynamic(acct, cfg, consumption, settings, now, snd, stats)
+	}
+	if consumption != nil {
+		r.evalSurge(acct, cfg, consumption, settings, now, snd, stats)
 	}
 
 	return nil
 }
 
-func (r *Runner) evalStatic(acct Account, cfg *models.BalanceAlertConfig, th float64, mode string, settings models.BalanceAlertSettings, now time.Time, snd Sender, stats *Stats) error {
+func customerPhones(cfg *models.BalanceAlertConfig, owner string) []string {
+	if cfg != nil {
+		if list := cfg.ReceiverList(); len(list) > 0 {
+			return list
+		}
+	}
+	owner = strings.TrimSpace(owner)
+	if owner == "" {
+		return nil
+	}
+	return []string{owner}
+}
+
+func (r *Runner) evalStatic(acct Account, cfg *models.BalanceAlertConfig, warnTh, platformTh float64, mode string, settings models.BalanceAlertSettings, now time.Time, snd Sender, stats *Stats) error {
 	warnAt, err := models.BalanceAlertRecordLastSentAt(r.Ctx, acct.ID, StateWarn)
 	if err != nil {
 		return err
@@ -221,7 +233,7 @@ func (r *Runner) evalStatic(acct Account, cfg *models.BalanceAlertConfig, th flo
 		return err
 	}
 
-	d := Decide(cfg.CurrentState, acct.Balance, th, now, SendHistory{WarnAt: warnAt, CriticalAt: critAt})
+	d := DecideWith(cfg.CurrentState, acct.Balance, warnTh, platformTh, now, SendHistory{WarnAt: warnAt, CriticalAt: critAt}, settings.CriticalRepeatAfter(), cfg.Enabled)
 	if d.NextState != cfg.CurrentState {
 		cfg.CurrentState = d.NextState
 		cfg.StateSince = &now
@@ -235,18 +247,25 @@ func (r *Runner) evalStatic(acct Account, cfg *models.BalanceAlertConfig, th flo
 	}
 	stats.Evaluated++
 
+	level := d.NextState
+	if d.SendLevel != "" {
+		level = d.SendLevel
+	}
+	th := warnTh
+	if level == StateCritical && platformTh > 0 {
+		th = platformTh
+	}
+
 	rec := &models.BalanceAlertRecord{
 		BillingAccountID: acct.ID,
-		Level:            d.NextState,
+		Level:            level,
 		BalanceUSD:       acct.Balance,
 		ThresholdUSD:     th,
 		ThresholdMode:    mode,
 		SendMode:         settings.SendMode,
 		Status:           d.Status,
 		TriggerType:      models.TriggerTypeStatic,
-	}
-	if d.SendLevel != "" {
-		rec.Level = d.SendLevel
+		CreatedAt:        now,
 	}
 
 	if d.Status == StatusSkippedCooldown {
@@ -258,6 +277,7 @@ func (r *Runner) evalStatic(acct Account, cfg *models.BalanceAlertConfig, th flo
 		return models.BalanceAlertRecordInsert(r.Ctx, rec)
 	}
 
+	phones := customerPhones(cfg, acct.Phone)
 	sendRes := snd.Send(SendRequest{
 		Mode:          settings.SendMode,
 		Level:         rec.Level,
@@ -266,8 +286,9 @@ func (r *Runner) evalStatic(acct Account, cfg *models.BalanceAlertConfig, th flo
 		AccountID:     acct.ID,
 		Name:          acct.Name,
 		Balance:       acct.Balance,
-		Threshold:     th,
-		Phone:         acct.Phone,
+		Threshold:     rec.ThresholdUSD,
+		Phone:         strings.Join(phones, ","),
+		Phones:        phones,
 		NotifyRuleID:  notifyRuleIDFor(settings),
 		PilotURLs:     settings.PilotReceivers,
 		SmsURL:        settings.SmsWebhook,
@@ -296,17 +317,17 @@ func (r *Runner) evalStatic(acct Account, cfg *models.BalanceAlertConfig, th flo
 }
 
 func (r *Runner) evalDynamic(acct Account, cfg *models.BalanceAlertConfig, consumption *Consumption, settings models.BalanceAlertSettings, now time.Time, snd Sender, stats *Stats) {
-	dr := EvaluateDynamic(acct.Balance, consumption)
+	dr := EvaluateDynamic(acct.Balance, consumption, acct.CreatedAt, now)
 	if !dr.ShouldAlert {
 		return
 	}
 
-	dynAt, err := models.BalanceAlertRecordLastSentAt(r.Ctx, acct.ID, StateWarn)
+	sentToday, err := models.BalanceAlertRecordSentTodayBalance(r.Ctx, acct.ID, startOfShanghaiDay(now))
 	if err != nil {
 		logger.Errorf("balancealert dynamic: %s: %v", acct.ID, err)
 		return
 	}
-	if !canSendToday(dynAt, now) {
+	if sentToday {
 		stats.Cooldown++
 		return
 	}
@@ -322,6 +343,7 @@ func (r *Runner) evalDynamic(acct Account, cfg *models.BalanceAlertConfig, consu
 		SendMode:         settings.SendMode,
 		Status:           StatusSent,
 		TriggerType:      models.TriggerTypeDynamic,
+		CreatedAt:        now,
 	}
 
 	ruleID := settings.DynamicNotifyRuleID
@@ -329,6 +351,7 @@ func (r *Runner) evalDynamic(acct Account, cfg *models.BalanceAlertConfig, consu
 		ruleID = notifyRuleIDFor(settings)
 	}
 
+	phones := customerPhones(cfg, acct.Phone)
 	sendRes := snd.Send(SendRequest{
 		Mode:          settings.SendMode,
 		Level:         StateWarn,
@@ -339,7 +362,8 @@ func (r *Runner) evalDynamic(acct Account, cfg *models.BalanceAlertConfig, consu
 		Balance:       acct.Balance,
 		Threshold:     0,
 		DynamicDays:   dr.Days,
-		Phone:         acct.Phone,
+		Phone:         strings.Join(phones, ","),
+		Phones:        phones,
 		NotifyRuleID:  ruleID,
 		PilotURLs:     settings.PilotReceivers,
 		SmsURL:        settings.SmsWebhook,
@@ -362,6 +386,67 @@ func (r *Runner) evalDynamic(acct Account, cfg *models.BalanceAlertConfig, consu
 	stats.Sent++
 	if err := models.BalanceAlertRecordInsert(r.Ctx, rec); err != nil {
 		logger.Errorf("balancealert dynamic: %s: %v", acct.ID, err)
+	}
+}
+
+func (r *Runner) evalSurge(acct Account, cfg *models.BalanceAlertConfig, consumption *Consumption, settings models.BalanceAlertSettings, now time.Time, snd Sender, stats *Stats) {
+	if !EvaluateSurge(consumption.AmountToday, consumption) {
+		return
+	}
+	last, err := models.BalanceAlertRecordLastSentAtByTrigger(r.Ctx, acct.ID, models.TriggerTypeSurge)
+	if err != nil {
+		logger.Errorf("balancealert surge: %s: %v", acct.ID, err)
+		return
+	}
+	if !canSendToday(last, now) {
+		stats.Cooldown++
+		return
+	}
+
+	stats.Evaluated++
+	rec := &models.BalanceAlertRecord{
+		BillingAccountID: acct.ID,
+		Level:            StateWarn,
+		BalanceUSD:       acct.Balance,
+		ThresholdUSD:     0,
+		ThresholdMode:    "SURGE",
+		SendMode:         settings.SendMode,
+		Status:           StatusSent,
+		TriggerType:      models.TriggerTypeSurge,
+		CreatedAt:        now,
+	}
+	phones := customerPhones(cfg, acct.Phone)
+	sendRes := snd.Send(SendRequest{
+		Mode:          settings.SendMode,
+		Level:         StateWarn,
+		ThresholdMode: "SURGE",
+		TriggerType:   models.TriggerTypeSurge,
+		AccountID:     acct.ID,
+		Name:          acct.Name,
+		Balance:       acct.Balance,
+		Phone:         strings.Join(phones, ","),
+		Phones:        phones,
+		NotifyRuleID:  notifyRuleIDFor(settings),
+		PilotURLs:     settings.PilotReceivers,
+		SmsURL:        settings.SmsWebhook,
+	})
+	rec.Channel = sendRes.Channel
+	rec.Receiver = sendRes.Receiver
+	if sendRes.Err != nil && settings.SendMode != SendModeOff && settings.SendMode != "" {
+		rec.Status = StatusFailed
+		stats.Failed++
+		if err := models.BalanceAlertRecordInsert(r.Ctx, rec); err != nil {
+			logger.Errorf("balancealert surge: %s: %v", acct.ID, err)
+		}
+		return
+	}
+	sentAt := now
+	if settings.SendMode != SendModeOff && settings.SendMode != "" {
+		rec.SentAt = &sentAt
+	}
+	stats.Sent++
+	if err := models.BalanceAlertRecordInsert(r.Ctx, rec); err != nil {
+		logger.Errorf("balancealert surge: %s: %v", acct.ID, err)
 	}
 }
 

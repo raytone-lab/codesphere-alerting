@@ -14,6 +14,8 @@ func TestResolveAccountByEmailOrPhoneSQL(t *testing.T) {
 		"LOWER(TRIM(COALESCE(u.email, '')))",
 		"TRIM(COALESCE(u.phone, ''))",
 		"account_wallets",
+		"last_recharge_usd",
+		"has_voucher",
 	}
 	for _, n := range needles {
 		if !strings.Contains(ResolveAccountByEmailOrPhoneSQL, n) {
@@ -39,10 +41,20 @@ func TestPrepaidSelectSQL(t *testing.T) {
 		"type = 'ADJUST' AND description LIKE 'voucher:%'",
 		"account_wallets",
 		"users u ON u.id = p.owner_user_id AND u.deleted_at IS NULL",
+		"p.created_at",
 	}
 	for _, n := range needles {
 		if !strings.Contains(PrepaidSelectSQL, n) {
 			t.Errorf("PrepaidSelectSQL missing %q", n)
+		}
+	}
+}
+
+func TestConsumptionSelectSQL(t *testing.T) {
+	needles := []string{"amount_7d", "amount_3d", "amount_today", "type = 'CONSUME'"}
+	for _, n := range needles {
+		if !strings.Contains(ConsumptionSelectSQL, n) {
+			t.Errorf("ConsumptionSelectSQL missing %q", n)
 		}
 	}
 }

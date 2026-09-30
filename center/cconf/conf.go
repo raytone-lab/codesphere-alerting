@@ -1,6 +1,8 @@
 package cconf
 
 import (
+	"os"
+	"strings"
 	"time"
 
 	"github.com/ccfos/nightingale/v6/pkg/httpx"
@@ -27,6 +29,27 @@ type Center struct {
 	CleanAlertHisEventDay int
 	MigrateBusiGroupLabel bool
 	RSA                   httpx.RSAConfig
+	Authing               Authing
+}
+
+// Authing holds the v3 AuthenticationClient settings used by 我的余额告警 OTP.
+// AppSecret is read only from [Center.Authing] in config.toml (no env overlay).
+type Authing struct {
+	AppHost     string
+	AppID       string
+	AppSecret   string
+	RedirectURI string
+}
+
+func (a *Authing) OverlayEnv() {
+	overlay := func(dst *string, key string) {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			*dst = v
+		}
+	}
+	overlay(&a.AppHost, "AUTHING_APP_HOST")
+	overlay(&a.AppID, "AUTHING_APP_ID")
+	overlay(&a.RedirectURI, "AUTHING_REDIRECT_URI")
 }
 
 type Plugin struct {
@@ -55,4 +78,5 @@ func (c *Center) PreCheck() {
 		// 默认使用项目根路径下的 agents/categraf 目录（与 integrations 同级）
 		c.AgentsDir = "agents/categraf"
 	}
+	c.Authing.OverlayEnv()
 }

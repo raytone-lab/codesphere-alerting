@@ -122,9 +122,9 @@ func (p *PostgreSQL) NewConn(ctx context.Context, database string) (*gorm.DB, er
 		}
 	}()
 
-	// RDS 拒绝明文。集成中心这条连接不读页面上的 SSL 选项，固定走加密且不校验 CA，
-	// 与中心自身 DATABASE_DSN 的 sslmode=require 一致。
-	dsn := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=require&TimeZone=Asia/Shanghai", url.QueryEscape(p.Shard.User), url.QueryEscape(p.Shard.Password), host, database)
+	// 本机 Postgres 通常不启 TLS；远端（RDS）仍默认 require。地址上的 ?sslmode= 优先。
+	sslmode := sslModeForAddr(p.Shard.Addr, host)
+	dsn := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=%s&TimeZone=Asia/Shanghai", url.QueryEscape(p.Shard.User), url.QueryEscape(p.Shard.Password), host, database, sslmode)
 
 	db, err = sqlbase.NewDB(
 		ctx,

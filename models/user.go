@@ -384,6 +384,9 @@ func (u *User) Add(ctx *ctx.Context) error {
 	now := time.Now().Unix()
 	u.CreateAt = now
 	u.UpdateAt = now
+	if u.LastActiveTime == 0 {
+		u.LastActiveTime = now
+	}
 	return Insert(ctx, u)
 }
 

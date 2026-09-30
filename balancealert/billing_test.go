@@ -58,3 +58,19 @@ func TestConsumptionSelectSQL(t *testing.T) {
 		}
 	}
 }
+
+func TestBillingUserSelectSQL(t *testing.T) {
+	needles := []string{
+		"FROM users u",
+		"deleted_at IS NULL",
+		"is_active",
+		"u.email",
+		"u.phone",
+		"u.nickname",
+	}
+	for _, n := range needles {
+		if !strings.Contains(BillingUserSelectSQL, n) {
+			t.Errorf("BillingUserSelectSQL missing %q", n)
+		}
+	}
+}

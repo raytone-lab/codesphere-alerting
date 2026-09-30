@@ -85,6 +85,9 @@ func runNoRouteCases(t *testing.T, r *gin.Engine) {
 			if tc.wantBody != "" && !strings.Contains(w.Body.String(), tc.wantBody) {
 				t.Fatalf("path %s: body = %q, want contains %q", tc.path, w.Body.String(), tc.wantBody)
 			}
+			if tc.name == "spa route" && !strings.Contains(w.Header().Get("Cache-Control"), "no-store") {
+				t.Fatalf("spa Cache-Control = %q, want no-store", w.Header().Get("Cache-Control"))
+			}
 		})
 	}
 }

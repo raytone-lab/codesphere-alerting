@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ccfos/nightingale/v6/balancealert"
 	"github.com/ccfos/nightingale/v6/models"
 	"github.com/ccfos/nightingale/v6/pkg/flashduty"
 	"github.com/ccfos/nightingale/v6/pkg/ginx"
@@ -139,6 +140,15 @@ func (rt *Router) userAddPost(c *gin.Context) {
 
 	ginx.Dangerous(u.Verify())
 	ginx.NewRender(c).Message(u.Add(rt.Ctx))
+}
+
+func (rt *Router) usersSyncBilling(c *gin.Context) {
+	settings, err := models.BalanceAlertSettingsGet(rt.Ctx)
+	ginx.Dangerous(err)
+	store, err := balancealert.OpenStore(rt.Ctx, settings)
+	ginx.Dangerous(err)
+	res, err := balancealert.SyncBillingUsers(c.Request.Context(), rt.Ctx, store, Username(c))
+	ginx.NewRender(c).Data(res, err)
 }
 
 func (rt *Router) userProfileGet(c *gin.Context) {

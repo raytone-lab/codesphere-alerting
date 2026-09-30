@@ -14,9 +14,10 @@ import (
 )
 
 type fakeStore struct {
-	accts       []Account
-	consumption []Consumption
-	err         error
+	accts        []Account
+	consumption  []Consumption
+	billingUsers []BillingUser
+	err          error
 }
 
 func (f fakeStore) ListPrepaid(ctx context.Context) ([]Account, error) {
@@ -29,6 +30,10 @@ func (f fakeStore) ListConsumption(ctx context.Context) ([]Consumption, error) {
 
 func (f fakeStore) ResolveAccountByEmailOrPhone(ctx context.Context, email, phone string) (*MyAccount, error) {
 	return nil, nil
+}
+
+func (f fakeStore) ListBillingUsers(ctx context.Context) ([]BillingUser, error) {
+	return f.billingUsers, f.err
 }
 
 func testRunnerCtx(t *testing.T) *ctx.Context {

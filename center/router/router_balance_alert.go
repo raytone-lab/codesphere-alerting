@@ -129,6 +129,21 @@ func (rt *Router) balanceAlertConfigPut(c *gin.Context) {
 
 var phoneRe = regexp.MustCompile(`^1[3-9]\d{9}$`)
 
+func loginContact(user *models.User) (email, phone string) {
+	if user == nil {
+		return "", ""
+	}
+	email = strings.TrimSpace(user.Email)
+	phone = strings.TrimSpace(user.Phone)
+	if phone == "" {
+		u := strings.TrimSpace(user.Username)
+		if phoneRe.MatchString(u) {
+			phone = u
+		}
+	}
+	return email, phone
+}
+
 const (
 	myAccountNeedBind = "need_bind"
 	myAccountNotFound = "not_found"
@@ -143,8 +158,7 @@ func (rt *Router) resolveMyBillingAccount(c *gin.Context) (*balancealert.MyAccou
 	if user == nil {
 		return nil, myAccountNotFound, nil
 	}
-	email := strings.TrimSpace(user.Email)
-	phone := strings.TrimSpace(user.Phone)
+	email, phone := loginContact(user)
 	if email == "" && phone == "" {
 		return nil, myAccountNeedBind, nil
 	}

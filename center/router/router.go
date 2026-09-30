@@ -190,6 +190,7 @@ func (rt *Router) configNoRoute(r *gin.Engine, fs *http.FileSystem) {
 				c.String(http.StatusNotFound, "not found")
 				return
 			}
+			c.Header("Cache-Control", "no-store")
 			if !rt.Center.UseFileAssets {
 				c.FileFromFS("/", *fs)
 			} else {
@@ -354,6 +355,7 @@ func (rt *Router) Config(r *gin.Engine) {
 
 		pages.GET("/users", rt.auth(), rt.user(), rt.perm("/users"), rt.userGets)
 		pages.POST("/users", rt.auth(), rt.user(), rt.perm("/users/add"), rt.userAddPost)
+		pages.POST("/users/sync-billing", rt.auth(), rt.user(), rt.perm("/users/add"), rt.usersSyncBilling)
 		pages.GET("/user/:id/profile", rt.auth(), rt.userProfileGet)
 		pages.PUT("/user/:id/profile", rt.auth(), rt.user(), rt.perm("/users/put"), rt.userProfilePut)
 		pages.PUT("/user/:id/password", rt.auth(), rt.user(), rt.perm("/users/put"), rt.userPasswordPut)

@@ -40,13 +40,42 @@ func SplitHostDatabase(addr string) (host, database string) {
 	return host, firstPathSegment(rest)
 }
 
-func firstPathSegment(path string) string {
-	path = strings.Trim(path, "/")
-	if path == "" {
+func firstPathSegment(rest string) string {
+	rest = strings.Trim(rest, "/")
+	if rest == "" {
 		return ""
 	}
-	if i := strings.Index(path, "/"); i >= 0 {
-		path = path[:i]
+	if slash := strings.Index(rest, "/"); slash >= 0 {
+		return rest[:slash]
 	}
-	return path
+	return rest
+}
+
+func sslModeForAddr(addr, host string) string {
+	raw := strings.TrimSpace(addr)
+	if q := strings.Index(raw, "?"); q >= 0 {
+		for _, part := range strings.Split(raw[q+1:], "&") {
+			if strings.HasPrefix(part, "sslmode=") {
+				mode := strings.TrimSpace(strings.TrimPrefix(part, "sslmode="))
+				if mode != "" {
+					return mode
+				}
+			}
+		}
+	}
+	h := host
+	if strings.HasPrefix(h, "[") {
+		end := strings.Index(h, "]")
+		if end > 0 {
+			h = h[1:end]
+		}
+	} else if i := strings.LastIndex(h, ":"); i > 0 {
+		h = h[:i]
+	}
+	switch h {
+	case "127.0.0.1", "localhost", "::1":
+		return "disable"
+	default:
+		return "require"
+	}
 }

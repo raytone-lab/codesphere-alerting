@@ -127,10 +127,35 @@ type MyAccount struct {
 	HasVoucher   bool
 }
 
+type BillingUser struct {
+	ID       string
+	Email    string
+	Phone    string
+	Nickname string
+}
+
+// BillingUserSelectSQL copies active billing users that have email or phone
+// so Nightingale 人员组织 can log in and match 我的余额告警.
+const BillingUserSelectSQL = `
+SELECT
+  u.id,
+  COALESCE(u.email, '') AS email,
+  COALESCE(u.phone, '') AS phone,
+  COALESCE(u.nickname, '') AS nickname
+FROM users u
+WHERE u.deleted_at IS NULL
+  AND COALESCE(u.is_active, TRUE) = TRUE
+  AND (
+    TRIM(COALESCE(u.email, '')) <> ''
+    OR TRIM(COALESCE(u.phone, '')) <> ''
+  )
+`
+
 type Store interface {
 	ListPrepaid(ctx context.Context) ([]Account, error)
 	ListConsumption(ctx context.Context) ([]Consumption, error)
 	ResolveAccountByEmailOrPhone(ctx context.Context, email, phone string) (*MyAccount, error)
+	ListBillingUsers(ctx context.Context) ([]BillingUser, error)
 }
 
 type PGStore struct {
@@ -217,6 +242,24 @@ func (s *PGStore) ResolveAccountByEmailOrPhone(ctx context.Context, email, phone
 		a.LastRecharge = &v
 	}
 	return &a, nil
+}
+
+func (s *PGStore) ListBillingUsers(ctx context.Context) ([]BillingUser, error) {
+	rows, err := s.db.WithContext(ctx).Raw(BillingUserSelectSQL).Rows()
+	if err != nil {
+		return nil, wrapBillingSelectErr(err)
+	}
+	defer rows.Close()
+
+	var out []BillingUser
+	for rows.Next() {
+		var u BillingUser
+		if err := rows.Scan(&u.ID, &u.Email, &u.Phone, &u.Nickname); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
 }
 
 func OpenStore(n9e *ctx.Context, s models.BalanceAlertSettings) (Store, error) {

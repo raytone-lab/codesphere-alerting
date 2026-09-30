@@ -27,3 +27,20 @@ func TestSplitHostDatabase(t *testing.T) {
 		})
 	}
 }
+
+func TestSslModeForAddr(t *testing.T) {
+	tests := []struct {
+		addr, host, want string
+	}{
+		{addr: "127.0.0.1:5432/ruidong_billing", host: "127.0.0.1:5432", want: "disable"},
+		{addr: "localhost:5432/app", host: "localhost:5432", want: "disable"},
+		{addr: "rds.example.com:5432/app", host: "rds.example.com:5432", want: "require"},
+		{addr: "127.0.0.1:5432/app?sslmode=require", host: "127.0.0.1:5432", want: "require"},
+	}
+	for _, tt := range tests {
+		got := sslModeForAddr(tt.addr, tt.host)
+		if got != tt.want {
+			t.Errorf("sslModeForAddr(%q,%q)=%q want %q", tt.addr, tt.host, got, tt.want)
+		}
+	}
+}

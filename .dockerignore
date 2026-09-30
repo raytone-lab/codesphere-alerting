@@ -1,0 +1,9 @@
+.git
+*.exe
+*.log
+data
+logs
+front/statik/statik.go
+agents
+tmp
+.cursor

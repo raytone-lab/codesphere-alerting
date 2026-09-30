@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1.7
+# Beijing nprod build. Frontend is served from /app/pub (UseFileAssets=true).
+# front/statik/statik.go is gitignored and only needed to satisfy the blank import.
+
+ARG BUILDER_IMAGE=public.ecr.aws/docker/library/golang:1.25-alpine
+ARG RUNTIME_IMAGE=public.ecr.aws/docker/library/alpine:3.20
+
+FROM ${BUILDER_IMAGE} AS builder
+ARG ALPINE_MIRROR=mirrors.aliyun.com
+ARG GOPROXY=https://goproxy.cn,direct
+ARG BUILD_SHA
+ENV GOPROXY=${GOPROXY}
+RUN sed -i "s/dl-cdn.alpinelinux.org/${ALPINE_MIRROR}/g" /etc/apk/repositories \
+    && apk add --no-cache git ca-certificates
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN test -f pub/index.html || (echo "pub/ is required in the build context" >&2; exit 1)
+RUN mkdir -p front/statik \
+    && if [ ! -s front/statik/statik.go ]; then printf '%s\n' 'package statik' > front/statik/statik.go; fi
+RUN CGO_ENABLED=0 go build \
+      -ldflags "-s -w -X github.com/ccfos/nightingale/v6/pkg/version.Version=${BUILD_SHA}" \
+      -o /out/n9e ./cmd/center
+
+FROM ${RUNTIME_IMAGE}
+ARG ALPINE_MIRROR=mirrors.aliyun.com
+ARG BUILD_SHA
+LABEL org.opencontainers.image.revision="${BUILD_SHA}"
+RUN sed -i "s/dl-cdn.alpinelinux.org/${ALPINE_MIRROR}/g" /etc/apk/repositories \
+    && apk add --no-cache ca-certificates tzdata \
+    && adduser -D -u 1000 -g 1000 n9e
+WORKDIR /app
+COPY --from=builder /out/n9e /app/n9e
+COPY etc /app/etc
+COPY --from=builder /src/pub /app/pub
+COPY docker/entrypoint-nprod.sh /app/entrypoint.sh
+RUN chmod 755 /app/n9e /app/entrypoint.sh \
+    && mkdir -p /app/data/tsdb /tmp/logs \
+    && chown -R 1000:1000 /app /tmp/logs
+USER 1000:1000
+EXPOSE 17000
+ENTRYPOINT ["/app/entrypoint.sh"]

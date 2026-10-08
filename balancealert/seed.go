@@ -65,6 +65,159 @@ var aliyunBalanceSmsTpl = map[string]string{
 	"value": `¥{{ index $event.AnnotationsJSON "balance" }}`,
 }
 
+const (
+	seedPilotNotifyRuleName    = "余额预警-试点钉钉"
+	seedCustomerNotifyRuleName = "余额预警-客户短信"
+	aliyunSMSChannelIdent      = "ali-sms"
+	aliyunSMSChannelName       = "阿里云短信"
+)
+
+type seedNotifyRuleSpec struct {
+	Name          string
+	ChannelIdent  string
+	TemplateIdent string
+}
+
+func SeedNotifyRules(n9e *ctx.Context) {
+	seedAliyunSMSChannelIfMissing(n9e)
+	for _, spec := range []seedNotifyRuleSpec{
+		{Name: seedPilotNotifyRuleName, ChannelIdent: models.Dingtalk, TemplateIdent: "balance-alert-pilot-dingtalk"},
+		{Name: seedCustomerNotifyRuleName, ChannelIdent: aliyunSMSChannelIdent, TemplateIdent: "balance-alert-sms-warn"},
+	} {
+		if err := seedOneNotifyRule(n9e, spec); err != nil {
+			logger.Errorf("balancealert seed: notify rule %s: %v", spec.Name, err)
+		}
+	}
+}
+
+func seedAliyunSMSChannelIfMissing(n9e *ctx.Context) {
+	ch, err := models.NotifyChannelGet(n9e, "ident = ?", aliyunSMSChannelIdent)
+	if err != nil {
+		logger.Errorf("balancealert seed: query channel %s: %v", aliyunSMSChannelIdent, err)
+		return
+	}
+	if ch == nil {
+		ch, err = models.NotifyChannelGet(n9e, "name = ?", aliyunSMSChannelName)
+		if err != nil {
+			logger.Errorf("balancealert seed: query channel name %s: %v", aliyunSMSChannelName, err)
+			return
+		}
+	}
+	if ch != nil {
+		return
+	}
+	now := time.Now().Unix()
+	ncc := &models.NotifyChannelConfig{
+		Name:        aliyunSMSChannelName,
+		Ident:       aliyunSMSChannelIdent,
+		Enable:      true,
+		RequestType: "http",
+		Weight:      8,
+		CreateAt:    now,
+		UpdateAt:    now,
+		CreateBy:    "system",
+		UpdateBy:    "system",
+		ParamConfig: &models.NotifyParamConfig{
+			UserInfo: &models.UserInfo{ContactKey: "phone"},
+		},
+		RequestConfig: &models.RequestConfig{
+			HTTPRequestConfig: &models.HTTPRequestConfig{
+				URL:           "https://dysmsapi.aliyuncs.com",
+				Method:        "POST",
+				Timeout:       10000,
+				RetryTimes:    2,
+				RetryInterval: 100,
+				Headers:       map[string]string{"Content-Type": "application/json"},
+				Request: models.RequestDetail{
+					Parameters: map[string]string{
+						"PhoneNumbers":    "{{ $sendto }}",
+						"SignName":        "",
+						"TemplateCode":    "SMS_512500774",
+						"TemplateParam":   `{"name":"","value":""}`,
+						"AccessKeyId":     "",
+						"AccessKeySecret": "",
+					},
+				},
+			},
+		},
+	}
+	if err := models.Insert(n9e, ncc); err != nil {
+		logger.Errorf("balancealert seed: create channel %s: %v", aliyunSMSChannelIdent, err)
+		return
+	}
+	logger.Infof("balancealert seed: created channel %s (%s)", aliyunSMSChannelIdent, aliyunSMSChannelName)
+}
+
+func seedOneNotifyRule(n9e *ctx.Context, spec seedNotifyRuleSpec) error {
+	existing, err := models.NotifyRuleGet(n9e, "name = ?", spec.Name)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return nil
+	}
+	channel, err := models.NotifyChannelGet(n9e, "ident = ?", spec.ChannelIdent)
+	if err != nil {
+		return err
+	}
+	if channel == nil {
+		logger.Infof("balancealert seed: skip rule %s, channel ident %s not found", spec.Name, spec.ChannelIdent)
+		return nil
+	}
+	tpl, err := models.MessageTemplateGet(n9e, "ident = ?", spec.TemplateIdent)
+	if err != nil {
+		return err
+	}
+	if tpl == nil {
+		logger.Infof("balancealert seed: skip rule %s, template ident %s not found", spec.Name, spec.TemplateIdent)
+		return nil
+	}
+	used, err := notifyRuleUsesChannel(n9e, channel.ID)
+	if err != nil {
+		return err
+	}
+	if used != "" {
+		logger.Infof("balancealert seed: skip rule %s, channel %s already used by %s", spec.Name, spec.ChannelIdent, used)
+		return nil
+	}
+	now := time.Now().Unix()
+	rule := &models.NotifyRule{
+		Name:         spec.Name,
+		Enable:       true,
+		UserGroupIds: []int64{},
+		NotifyConfigs: []models.NotifyConfig{{
+			ChannelID:  channel.ID,
+			TemplateID: tpl.ID,
+			Params:     map[string]interface{}{},
+			Severities: []int{1, 2, 3},
+		}},
+		CreateAt: now,
+		UpdateAt: now,
+		CreateBy: "system",
+		UpdateBy: "system",
+	}
+	if err := models.Insert(n9e, rule); err != nil {
+		return err
+	}
+	logger.Infof("balancealert seed: created notify rule %s channel_id=%d template_id=%d", spec.Name, channel.ID, tpl.ID)
+	return nil
+}
+
+func notifyRuleUsesChannel(n9e *ctx.Context, channelID int64) (string, error) {
+	lst, err := models.NotifyRulesGet(n9e, "", nil)
+	if err != nil {
+		return "", err
+	}
+	for _, r := range lst {
+		for _, nc := range r.NotifyConfigs {
+			if nc.ChannelID == channelID {
+				return r.Name, nil
+			}
+		}
+	}
+	return "", nil
+}
+
 func SeedMessageTemplates(n9e *ctx.Context) {
 	for _, s := range seedTemplates {
 		existing, err := models.MessageTemplateGet(n9e, "ident = ?", s.Ident)

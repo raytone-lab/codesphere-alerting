@@ -14,6 +14,27 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func (rt *Router) balanceAlertNotifyRulesGet(c *gin.Context) {
+	lst, err := models.NotifyRulesGet(rt.Ctx, "", nil)
+	if err != nil {
+		ginx.NewRender(c).Data(nil, err)
+		return
+	}
+	type item struct {
+		ID     int64  `json:"id"`
+		Name   string `json:"name"`
+		Enable bool   `json:"enable"`
+	}
+	out := make([]item, 0, len(lst))
+	for _, r := range lst {
+		if r == nil {
+			continue
+		}
+		out = append(out, item{ID: r.ID, Name: r.Name, Enable: r.Enable})
+	}
+	ginx.NewRender(c).Data(out, nil)
+}
+
 func (rt *Router) balanceAlertSettingsGet(c *gin.Context) {
 	s, err := models.BalanceAlertSettingsGet(rt.Ctx)
 	if err != nil {

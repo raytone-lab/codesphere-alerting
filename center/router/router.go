@@ -526,6 +526,7 @@ func (rt *Router) Config(r *gin.Engine) {
 		pages.GET("/config", rt.auth(), rt.admin(), rt.configGetByKey)
 		pages.PUT("/config", rt.auth(), rt.admin(), rt.configPutByKey)
 
+		pages.GET("/balance-alert/notify-rules", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertNotifyRulesGet)
 		pages.GET("/balance-alert/settings", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertSettingsGet)
 		pages.PUT("/balance-alert/settings", rt.auth(), rt.admin(), rt.balanceAlertSettingsPut)
 		pages.GET("/balance-alert/records", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertRecordsGet)

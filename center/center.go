@@ -199,7 +199,9 @@ func Initialize(configDir string, cryptoKey string) (func(), error) {
 		ConfigCvalCache:      configCvalCache,
 		Fallback:             balancealert.HTTPSender{HTTP: balancealert.DefaultHTTP()},
 	})
+	models.InitNotifyChannel(ctx)
 	balancealert.SeedMessageTemplates(ctx)
+	balancealert.SeedNotifyRules(ctx)
 	go balancealert.StartCron(ctx)
 
 	alertrtRouter := alertrt.New(config.HTTP, config.Alert, alertMuteCache, targetCache, busiGroupCache, alertStats, ctx, externalProcessors, config.Log.Dir)

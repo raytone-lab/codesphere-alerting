@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -114,6 +115,9 @@ func (p *AliyunSmsProvider) sendHTTPRequest(httpConfig *models.HTTPRequestConfig
 			logger.Errorf("send_http: failed to read response. url=%s error=%v", safeURL, err)
 		}
 		if resp.StatusCode == http.StatusOK {
+			if err := aliyunSMSBizError(body); err != nil {
+				return fmt.Sprintf("status_code:%d, response:%s", resp.StatusCode, string(body)), err
+			}
 			return fmt.Sprintf("status_code:%d, response:%s", resp.StatusCode, string(body)), nil
 		}
 
@@ -263,4 +267,20 @@ func percentEncode(str string) string {
 	encoded = strings.ReplaceAll(encoded, "*", "%2A")
 	encoded = strings.ReplaceAll(encoded, "%7E", "~")
 	return encoded
+}
+
+// aliyunSMSBizError treats HTTP 200 with Code != OK as a send failure.
+// Aliyun SendSms always returns HTTP 200; the real result is in Code/Message.
+func aliyunSMSBizError(body []byte) error {
+	var resp struct {
+		Code    string `json:"Code"`
+		Message string `json:"Message"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil
+	}
+	if resp.Code == "" || strings.EqualFold(resp.Code, "OK") {
+		return nil
+	}
+	return fmt.Errorf("aliyun sms rejected: %s %s", resp.Code, resp.Message)
 }

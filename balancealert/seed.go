@@ -34,37 +34,35 @@ var seedTemplates = []seedTpl{
 		Ident:              "balance-alert-sms-warn",
 		NotifyChannelIdent: "ali-sms",
 		Weight:             0,
-		Content: map[string]string{
-			"content": `【签名】{{ index $event.AnnotationsJSON "enterprise_name" }}您好，您的账户余额为{{ index $event.AnnotationsJSON "balance" }}元，为避免影响业务调用请及时充值。`,
-		},
+		Content:            aliyunBalanceSmsTpl,
 	},
 	{
 		Name:               "余额预警-短信-CRITICAL",
 		Ident:              "balance-alert-sms-critical",
 		NotifyChannelIdent: "ali-sms",
 		Weight:             0,
-		Content: map[string]string{
-			"content": `【签名】{{ index $event.AnnotationsJSON "enterprise_name" }}您好，您的账户余额已耗尽/即将耗尽，服务即将暂停，请立即充值恢复。`,
-		},
+		Content:            aliyunBalanceSmsTpl,
 	},
 	{
 		Name:               "余额预警-短信-体验额度",
 		Ident:              "balance-alert-sms-voucher",
 		NotifyChannelIdent: "ali-sms",
 		Weight:             0,
-		Content: map[string]string{
-			"content": `【签名】{{ index $event.AnnotationsJSON "enterprise_name" }}您好，您的体验额度即将用完，充值后可继续使用服务。`,
-		},
+		Content:            aliyunBalanceSmsTpl,
 	},
 	{
 		Name:               "余额预警-短信-动态预警",
 		Ident:              "balance-alert-dynamic-sms",
 		NotifyChannelIdent: "ali-sms",
 		Weight:             0,
-		Content: map[string]string{
-			"content": `【签名】{{ index $event.AnnotationsJSON "enterprise_name" }}您好，按当前消耗速度，您的账户余额仅剩{{ index $event.AnnotationsJSON "remaining_days" }}，请及时充值以避免服务中断。`,
-		},
+		Content:            aliyunBalanceSmsTpl,
 	},
+}
+
+// aliyunBalanceSmsTpl fills Aliyun template SMS_512500774 variables ${name} ${value}.
+var aliyunBalanceSmsTpl = map[string]string{
+	"name":  `{{ index $event.AnnotationsJSON "enterprise_name" }}`,
+	"value": `¥{{ index $event.AnnotationsJSON "balance" }}`,
 }
 
 func SeedMessageTemplates(n9e *ctx.Context) {
@@ -75,7 +73,7 @@ func SeedMessageTemplates(n9e *ctx.Context) {
 			continue
 		}
 		if existing != nil {
-			if existing.Content["content"] != s.Content["content"] {
+			if !seedContentEqual(existing.Content, s.Content) {
 				contentJSON, err := json.Marshal(s.Content)
 				if err != nil {
 					logger.Errorf("balancealert seed: marshal content for %s: %v", s.Ident, err)
@@ -112,4 +110,16 @@ func SeedMessageTemplates(n9e *ctx.Context) {
 		}
 		logger.Infof("balancealert seed: created template %s (%s)", s.Ident, s.Name)
 	}
+}
+
+func seedContentEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }

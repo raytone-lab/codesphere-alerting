@@ -2,6 +2,7 @@ package balancealert
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -87,6 +88,9 @@ func (s *N9eNotifySender) Send(req SendRequest) SendResult {
 		} else {
 			tplContent = fallbackTplContent(req)
 		}
+		if req.Mode == SendModeCustomer {
+			tplContent = withAliyunSmsVars(req, tplContent)
+		}
 
 		ncCtx, err := dispatch.BuildNotifyContext(s.Ctx, s.UserCache, s.UserGroupCache,
 			events, ruleID, &nc, ch, tplContent,
@@ -96,12 +100,13 @@ func (s *N9eNotifySender) Send(req SendRequest) SendResult {
 			continue
 		}
 
-		// CUSTOMER SMS: always use enterprise receivers (or owner phone).
+		// CUSTOMER SMS only: do not touch DingTalk / PILOT channel config.
 		if req.Mode == SendModeCustomer {
 			phones := requestPhones(req)
 			if len(phones) > 0 {
 				ncCtx.Request.Sendtos = phones
 			}
+			applyCustomerAliyunTemplateParam(ncCtx, req)
 		}
 
 		result := notifySync(s.Ctx, ncCtx)
@@ -253,11 +258,75 @@ func fallbackTplContent(req SendRequest) map[string]interface{} {
 		RenderCopy(req),
 		req.Balance,
 	)
-	return map[string]interface{}{
+	tpl := map[string]interface{}{
 		"content": body,
 		"text":    body,
 		"title":   "预付费余额预警",
 	}
+	if req.Mode == SendModeCustomer {
+		return withAliyunSmsVars(req, tpl)
+	}
+	return tpl
+}
+
+// aliyunSmsVars matches Aliyun template SMS_512500774:
+// 尊敬的 ${name}，您的余额为${value}，请及时充值，以免耽误您的正常使用。
+func aliyunSmsVars(req SendRequest) (name, value string) {
+	name = strings.TrimSpace(req.Name)
+	if name == "" {
+		name = req.AccountID
+	}
+	return name, fmt.Sprintf("¥%.2f", req.Balance)
+}
+
+func aliyunSmsTemplateParam(req SendRequest) string {
+	name, value := aliyunSmsVars(req)
+	b, err := json.Marshal(map[string]string{"name": name, "value": value})
+	if err != nil {
+		return fmt.Sprintf(`{"name":%q,"value":%q}`, name, value)
+	}
+	return string(b)
+}
+
+func withAliyunSmsVars(req SendRequest, tpl map[string]interface{}) map[string]interface{} {
+	if tpl == nil {
+		tpl = map[string]interface{}{}
+	}
+	name, value := aliyunSmsVars(req)
+	tpl["name"] = name
+	tpl["value"] = value
+	return tpl
+}
+
+// applyCustomerAliyunTemplateParam clones the cached channel and writes TemplateParam
+// as already-rendered JSON so Aliyun receives ${name}/${value}, not Nightingale's
+// default ${incident}. Cloning avoids mutating the notify-channel cache.
+func applyCustomerAliyunTemplateParam(ncCtx *dispatch.NotifyContext, req SendRequest) {
+	if ncCtx == nil || ncCtx.Request == nil || ncCtx.Request.Config == nil {
+		return
+	}
+	ch := ncCtx.Request.Config
+	if ch.Ident != provider.AliyunSmsIdent {
+		return
+	}
+	if ch.RequestConfig == nil || ch.RequestConfig.HTTPRequestConfig == nil {
+		return
+	}
+
+	origHTTP := ch.RequestConfig.HTTPRequestConfig
+	params := make(map[string]string, len(origHTTP.Request.Parameters)+1)
+	for k, v := range origHTTP.Request.Parameters {
+		params[k] = v
+	}
+	params["TemplateParam"] = aliyunSmsTemplateParam(req)
+
+	httpCopy := *origHTTP
+	httpCopy.Request.Parameters = params
+	reqCfgCopy := *ch.RequestConfig
+	reqCfgCopy.HTTPRequestConfig = &httpCopy
+	chCopy := *ch
+	chCopy.RequestConfig = &reqCfgCopy
+	ncCtx.Request.Config = &chCopy
 }
 
 func uniqueNonEmpty(in []string) []string {

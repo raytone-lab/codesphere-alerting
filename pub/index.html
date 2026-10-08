@@ -1,0 +1,481 @@
+<!--
+  ~ Copyright 2022 Nightingale Team
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~ http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  ~
+-->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>睿动</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      .preloader {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        flex-direction: column;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .preloader__enter {
+        opacity: 0;
+        animation-name: preloader-fade-in;
+        animation-iteration-count: 1;
+        animation-duration: 0.9s;
+        animation-delay: 0.5s;
+        animation-fill-mode: forwards;
+      }
+
+      .preloader__bounce {
+        text-align: center;
+        animation-name: preloader-bounce;
+        animation-duration: 0.9s;
+        animation-iteration-count: infinite;
+      }
+
+      .preloader__logo {
+        display: inline-block;
+        animation-name: preloader-squash;
+        animation-duration: 0.9s;
+        animation-iteration-count: infinite;
+        width: 60px;
+        height: 60px;
+        background-repeat: no-repeat;
+        background-size: contain;
+        background-image: url('/image/logo-ruidong.svg');
+        width: 168px;
+        height: 40px;
+      }
+
+      @keyframes preloader-fade-in {
+        0% {
+          opacity: 0;
+          /*animation-timing-function: linear;*/
+          animation-timing-function: cubic-bezier(0, 0, 0.5, 1);
+        }
+
+        100% {
+          opacity: 1;
+        }
+      }
+
+      @keyframes preloader-bounce {
+        from,
+        to {
+          transform: translateY(0px);
+          animation-timing-function: cubic-bezier(0.3, 0, 0.1, 1);
+        }
+
+        50% {
+          transform: translateY(-50px);
+          animation-timing-function: cubic-bezier(0.9, 0, 0.7, 1);
+        }
+      }
+
+      @keyframes preloader-squash {
+        0% {
+          transform: scaleX(1.3) scaleY(0.8);
+          animation-timing-function: cubic-bezier(0.3, 0, 0.1, 1);
+        }
+
+        15% {
+          transform: scaleX(0.75) scaleY(1.25);
+          animation-timing-function: cubic-bezier(0, 0, 0.7, 0.75);
+        }
+
+        55% {
+          transform: scaleX(1.05) scaleY(0.95);
+          animation-timing-function: cubic-bezier(0.9, 0, 1, 1);
+        }
+
+        95% {
+          transform: scaleX(0.75) scaleY(1.25);
+          animation-timing-function: cubic-bezier(0, 0, 0, 1);
+        }
+
+        100% {
+          transform: scaleX(1.3) scaleY(0.8);
+          animation-timing-function: cubic-bezier(0, 0, 0.7, 1);
+        }
+      }
+
+      #rd-sync-users-wrap {
+        display: inline-flex;
+        align-items: center;
+      }
+      #rd-sync-users-btn.ant-btn {
+        height: 32px;
+        padding: 4px 15px;
+        font-size: 14px;
+        line-height: 1.5715;
+        white-space: nowrap;
+      }
+
+      .n9e-onboarding-badge,
+      a[href="/landing"],
+      .document-open-button,
+      a[href*="github.com/ccfos/nightingale/issues"],
+      .product-changelog,
+      .page-header-action-group .relative:has(.product-changelog),
+      #HW_badge_cont,
+      #HW_frame_cont,
+      #HW_frame,
+      .HW_badge_cont,
+      .HW_frame_cont,
+      iframe[src*="headway-widget"],
+      iframe[src*="headwayapp"] {
+        display: none !important;
+      }
+    </style>
+    <link rel="icon" href="/image/favicon.svg" />
+    <script>
+      (function () {
+        var TITLE = "睿动";
+        var ICON = "/image/favicon.svg";
+        function applyBrandTab() {
+          if (document.title !== TITLE) document.title = TITLE;
+          var icons = document.querySelectorAll("link[rel*='icon']");
+          if (!icons.length) {
+            var link = document.createElement("link");
+            link.rel = "icon";
+            link.href = ICON;
+            document.head.appendChild(link);
+            return;
+          }
+          icons.forEach(function (el) {
+            if (el.getAttribute("href") !== ICON) el.setAttribute("href", ICON);
+          });
+        }
+        applyBrandTab();
+        document.addEventListener("DOMContentLoaded", applyBrandTab);
+        setInterval(applyBrandTab, 800);
+      })();
+    </script>
+    <script src="/js/node-sql-parser@4.10.0_umd_mysql.umd.js"></script>
+    <script src="/js/placement.min.js"></script>
+    <script>
+      (function () {
+        var iframePages = {
+          "/system/balance-alert": { id: "rd-ba-shell", src: "/balance-alert.html?v=list20", title: "预付费余额预警" },
+          "/system/enterprise-balance": { id: "rd-eb-shell", src: "/enterprise-balance.html?v=6", title: "我的余额告警" }
+        };
+        function siderWidth() {
+          var row = document.querySelector(".side-menu-logo-row, .side-menu-collapsed-logo-row");
+          if (!row || !row.parentElement) return 208;
+          return Math.round(row.parentElement.getBoundingClientRect().width);
+        }
+        function findMatch(href) {
+          if (typeof href !== "string") return null;
+          for (var p in iframePages) {
+            if (href.indexOf(p) !== -1) return p;
+          }
+          return null;
+        }
+        function mount() {
+          var href = location.pathname + location.search;
+          var matched = findMatch(href);
+          for (var p in iframePages) {
+            var cfg = iframePages[p];
+            var el = document.getElementById(cfg.id);
+            if (p === matched) {
+              if (!el) {
+                document.documentElement.style.setProperty("--rd-sider-width", siderWidth() + "px");
+                el = document.createElement("div");
+                el.id = cfg.id;
+                el.className = cfg.id;
+                el.innerHTML = '<iframe src="' + cfg.src + '" title="' + cfg.title + '"></iframe>';
+                document.body.appendChild(el);
+              }
+            } else if (el) {
+              el.remove();
+            }
+          }
+        }
+        function hijack(href) {
+          if (!findMatch(href)) return false;
+          setTimeout(mount, 0);
+          setTimeout(mount, 300);
+          return false;
+        }
+        if (hijack(location.pathname + location.search)) return;
+        var ps = history.pushState;
+        history.pushState = function (s, t, u) {
+          var ret = ps.apply(this, arguments);
+          setTimeout(mount, 0);
+          return ret;
+        };
+        var rs = history.replaceState;
+        history.replaceState = function (s, t, u) {
+          var ret = rs.apply(this, arguments);
+          setTimeout(mount, 0);
+          return ret;
+        };
+        window.addEventListener("popstate", function () { mount(); });
+        document.addEventListener("click", function (e) {
+          var a = e.target && e.target.closest ? e.target.closest("a") : null;
+          if (!a) return;
+          var href = a.getAttribute("href") || a.href || "";
+          if (!findMatch(href)) return;
+          setTimeout(mount, 0);
+          setTimeout(mount, 300);
+        }, true);
+        setInterval(function () {
+          for (var p in iframePages) {
+            var el = document.getElementById(iframePages[p].id);
+            if (el) {
+              document.documentElement.style.setProperty("--rd-sider-width", siderWidth() + "px");
+              break;
+            }
+          }
+        }, 400);
+      })();
+      (function hideLeftoverChrome() {
+        function hide() {
+          function off(el) {
+            el.style.setProperty("display", "none", "important");
+          }
+          document.querySelectorAll(".n9e-onboarding-badge").forEach(off);
+          document.querySelectorAll('a[href="/landing"]').forEach(off);
+          document.querySelectorAll("#HW_badge_cont, #HW_frame_cont, #HW_frame, .HW_badge_cont, .HW_frame_cont, .product-changelog, iframe[src*='headway']").forEach(off);
+          document.querySelectorAll(".page-header-action-group .relative").forEach(function (el) {
+            if (el.querySelector(".product-changelog")) off(el);
+          });
+          document.querySelectorAll("button.ant-btn").forEach(function (el) {
+            if ((el.innerText || "").replace(/\s+/g, " ").trim() === "Nightingale AI") off(el);
+          });
+          document.querySelectorAll("div.h-8").forEach(function (el) {
+            var t = (el.innerText || "").replace(/\s+/g, " ").trim();
+            if (t === "Quick jump" || t === "快捷跳转") off(el);
+          });
+          document.querySelectorAll(".login-title, .login-home, .login-message").forEach(off);
+          document.querySelectorAll('a[href="/system/balance-alert"], a[href*="/system/balance-alert"]').forEach(function (el) {
+            var nodes = el.querySelectorAll("span, div");
+            var list = nodes.length ? nodes : [el];
+            list.forEach(function (node) {
+              if (node.childElementCount > 0) return;
+              var t = (node.textContent || "").trim();
+              if (t === "Balance Alert" || t === "Prepaid Balance Alert") node.textContent = "预付费余额预警";
+            });
+          });
+          document.querySelectorAll('a[href="/system/enterprise-balance"], a[href*="/system/enterprise-balance"]').forEach(function (el) {
+            var nodes = el.querySelectorAll("span, div");
+            var list = nodes.length ? nodes : [el];
+            list.forEach(function (node) {
+              if (node.childElementCount > 0) return;
+              var t = (node.textContent || "").trim();
+              if (
+                t === "Enterprise Balance Alert Config" ||
+                t === "Enterprise Balance Config" ||
+                t === "企业余额预警配置" ||
+                t === "企业余额告警配置" ||
+                t === "我的余额预警" ||
+                t === "余额预警配置"
+              ) {
+                node.textContent = "我的余额告警";
+              }
+            });
+          });
+          if (document.querySelector(".login-warp") && !document.getElementById("rd-login-brand")) {
+            var brand = document.createElement("a");
+            brand.id = "rd-login-brand";
+            brand.className = "rd-login-brand";
+            brand.href = "/";
+            brand.setAttribute("aria-label", "睿动");
+            brand.innerHTML = '<img class="rd-brand-logo" src="/image/logo-ruidong.svg" alt="睿动" /><span class="rd-brand-badge">告警</span>';
+            document.body.appendChild(brand);
+          }
+        }
+        setTimeout(hide, 0);
+        setTimeout(hide, 400);
+        setTimeout(hide, 1200);
+        var n = 0;
+        var tmr = setInterval(function () {
+          hide();
+          n++;
+          if (n > 20) clearInterval(tmr);
+        }, 300);
+      })();
+      (function syncBillingUsersBtn() {
+        var LABEL = "同步人员信息";
+        function isUsersPage() {
+          var p = (location.pathname || "").replace(/\/+$/, "") || "/";
+          return p === "/users";
+        }
+        function token() {
+          return localStorage.getItem("access_token") || localStorage.getItem("accessToken") || "";
+        }
+        function removeBtn() {
+          var wrap = document.getElementById("rd-sync-users-wrap");
+          if (wrap) wrap.remove();
+          var btn = document.getElementById("rd-sync-users-btn");
+          if (btn) btn.remove();
+        }
+        function addAnchor() {
+          var operate = document.querySelector(".user-manage-content .user-manage-operate");
+          if (operate) return operate.closest(".ant-space-item") || operate;
+          var right = document.querySelector(".user-manage-content .event-table-search-right");
+          if (right) return right.firstElementChild;
+          var buttons = document.querySelectorAll(".user-manage-content button, .event-table-search-right button");
+          for (var i = 0; i < buttons.length; i++) {
+            var t = (buttons[i].innerText || "").replace(/\s+/g, " ").trim();
+            if (t === "Add" || t === "新增" || t === "添加" || t === "创建用户" || t === "Create user") {
+              return buttons[i].closest(".ant-space-item") || buttons[i];
+            }
+          }
+          return null;
+        }
+        function bindClick(btn) {
+          btn.onclick = function () {
+            if (btn.disabled) return;
+            btn.disabled = true;
+            var prev = btn.textContent;
+            btn.textContent = "同步中…";
+            fetch("/api/n9e/users/sync-billing", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + token(),
+                "X-User-Token": token()
+              }
+            }).then(function (r) { return r.text().then(function (text) { return { r: r, text: text }; }); })
+              .then(function (x) {
+                var j = {};
+                if (x.text) {
+                  try { j = JSON.parse(x.text); } catch (e) { throw new Error(x.text); }
+                }
+                if (!x.r.ok || j.err) throw new Error(j.err || x.text || ("请求失败 " + x.r.status));
+                var d = j.dat || {};
+                var msg = "同步完成：新增 " + (d.created || 0) + "，更新 " + (d.updated || 0);
+                if (d.skipped_admin) msg += "，跳过管理员 " + d.skipped_admin;
+                if (d.initial_password && d.created) msg += "。新账号初始密码：" + d.initial_password;
+                alert(msg);
+                location.reload();
+              })
+              .catch(function (e) {
+                alert(e.message || String(e));
+                btn.disabled = false;
+                btn.textContent = prev;
+              });
+          };
+        }
+        function ensure() {
+          if (!isUsersPage()) {
+            removeBtn();
+            return;
+          }
+          var anchor = addAnchor();
+          if (!anchor || !anchor.parentElement) return;
+          var existing = document.getElementById("rd-sync-users-wrap");
+          if (existing) {
+            if (existing.nextSibling !== anchor) {
+              anchor.parentElement.insertBefore(existing, anchor);
+            }
+            return;
+          }
+          var wrap = document.createElement("div");
+          wrap.id = "rd-sync-users-wrap";
+          wrap.className = "ant-space-item";
+          var btn = document.createElement("button");
+          btn.id = "rd-sync-users-btn";
+          btn.type = "button";
+          btn.className = "ant-btn ant-btn-default";
+          btn.textContent = LABEL;
+          bindClick(btn);
+          wrap.appendChild(btn);
+          anchor.parentElement.insertBefore(wrap, anchor);
+        }
+        function patchHistory() {
+          if (history.pushState && !history.pushState._rdSyncUsers) {
+            var ps = history.pushState;
+            history.pushState = function () {
+              var ret = ps.apply(this, arguments);
+              setTimeout(ensure, 0);
+              return ret;
+            };
+            history.pushState._rdSyncUsers = true;
+          }
+          if (history.replaceState && !history.replaceState._rdSyncUsers) {
+            var rs = history.replaceState;
+            history.replaceState = function () {
+              var ret = rs.apply(this, arguments);
+              setTimeout(ensure, 0);
+              return ret;
+            };
+            history.replaceState._rdSyncUsers = true;
+          }
+        }
+        var scheduled = false;
+        function scheduleEnsure() {
+          if (scheduled) return;
+          scheduled = true;
+          setTimeout(function () {
+            scheduled = false;
+            ensure();
+          }, 0);
+        }
+        function watchDom() {
+          var root = document.body;
+          if (!root || root.getAttribute("data-rd-sync-users-obs")) return;
+          root.setAttribute("data-rd-sync-users-obs", "1");
+          new MutationObserver(function () { scheduleEnsure(); }).observe(root, { childList: true, subtree: true });
+        }
+        patchHistory();
+        window.addEventListener("popstate", scheduleEnsure);
+        document.addEventListener("DOMContentLoaded", function () {
+          watchDom();
+          ensure();
+        });
+        document.addEventListener("click", function (e) {
+          var a = e.target && e.target.closest ? e.target.closest("a") : null;
+          if (!a) return;
+          var href = a.getAttribute("href") || "";
+          if (href === "/users" || /\/users\/?$/.test(href)) scheduleEnsure();
+        }, true);
+        watchDom();
+        setInterval(function () {
+          patchHistory();
+          watchDom();
+          ensure();
+        }, 400);
+        ensure();
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-0720a85a.js?v=theme9-sync2"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-26c701cf.js">
+    <link rel="modulepreload" crossorigin href="/assets/antdChunk-5079372a.js">
+    <link rel="modulepreload" crossorigin href="/assets/excelChunk-cb15ab9d.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor1-ecdb8205.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor2-228dd3c5.js">
+    <link rel="stylesheet" href="/assets/index-2edbdedc.css">
+    <link rel="stylesheet" href="/assets/ruidong-theme.css?v=theme9">
+  </head>
+
+  <body>
+    <div class="preloader">
+      <div class="preloader__enter">
+        <div class="preloader__bounce">
+          <div class="preloader__logo" aria-live="polite" role="status" aria-label="Loading"></div>
+        </div>
+      </div>
+    </div>
+    <div id="root"></div>
+    <div id="hoc-renderer-root"></div>
+    
+    
+  </body>
+</html>

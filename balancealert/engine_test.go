@@ -7,17 +7,37 @@ import (
 
 func TestComputeThreshold(t *testing.T) {
 	recharge := 1000.0
-	th, mode, skip := ComputeThreshold(&recharge, true, 20)
+	th, mode, skip := ComputeThreshold(&recharge, true, 20, 5)
 	if skip || mode != ModeLastRecharge5Pct || th != 50 {
 		t.Fatalf("recharge: th=%v mode=%s skip=%v", th, mode, skip)
 	}
 
-	th, mode, skip = ComputeThreshold(nil, true, 20)
+	th, mode, skip = ComputeThreshold(&recharge, true, 20, 10)
+	if skip || mode != ModeLastRecharge5Pct || th != 100 {
+		t.Fatalf("custom 10%%: th=%v mode=%s skip=%v", th, mode, skip)
+	}
+
+	th, mode, skip = ComputeThreshold(&recharge, true, 20, 0)
+	if skip || mode != ModeLastRecharge5Pct || th != 50 {
+		t.Fatalf("zero pct defaults to 5%%: th=%v mode=%s skip=%v", th, mode, skip)
+	}
+
+	th, mode, skip = ComputeThreshold(&recharge, true, 20, 100)
+	if skip || mode != ModeLastRecharge5Pct || th != 1000 {
+		t.Fatalf("100%%: th=%v mode=%s skip=%v", th, mode, skip)
+	}
+
+	th, mode, skip = ComputeThreshold(&recharge, true, 20, 101)
+	if skip || mode != ModeLastRecharge5Pct || th != 50 {
+		t.Fatalf("out of range defaults to 5%%: th=%v mode=%s skip=%v", th, mode, skip)
+	}
+
+	th, mode, skip = ComputeThreshold(nil, true, 20, 5)
 	if skip || mode != ModeVoucherFixed || th != 20 {
 		t.Fatalf("voucher: th=%v mode=%s skip=%v", th, mode, skip)
 	}
 
-	_, _, skip = ComputeThreshold(nil, false, 20)
+	_, _, skip = ComputeThreshold(nil, false, 20, 5)
 	if !skip {
 		t.Fatal("no recharge and no voucher should skip")
 	}

@@ -254,7 +254,7 @@ func (rt *Router) balanceAlertMyConfigGet(c *gin.Context) {
 		out["current_state"] = cfg.CurrentState
 	}
 	settings, _ := models.BalanceAlertSettingsGet(rt.Ctx)
-	platformTh, platformMode, _ := balancealert.ComputeThreshold(acc.LastRecharge, acc.HasVoucher, settings.VoucherThresholdUSD)
+	platformTh, platformMode, _ := balancealert.ComputeThreshold(acc.LastRecharge, acc.HasVoucher, settings.VoucherThresholdUSD, settings.LastRechargePct)
 	out["platform_threshold_usd"] = platformTh
 	out["platform_threshold_mode"] = platformMode
 	out["threshold_usd"] = platformTh
@@ -304,7 +304,7 @@ func (rt *Router) balanceAlertMyConfigPut(c *gin.Context) {
 			ginx.NewRender(c).Message(err)
 			return
 		}
-		platformTh, _, skip := balancealert.ComputeThreshold(acc.LastRecharge, acc.HasVoucher, settings.VoucherThresholdUSD)
+		platformTh, _, skip := balancealert.ComputeThreshold(acc.LastRecharge, acc.HasVoucher, settings.VoucherThresholdUSD, settings.LastRechargePct)
 		if !skip && platformTh > 0 && body.ThresholdFixedUSD <= platformTh {
 			ginx.NewRender(c).Message(fmt.Sprintf("自定义警戒线必须高于平台默认线（当前 %.2f 元）", platformTh))
 			return
@@ -422,7 +422,7 @@ func (rt *Router) balanceAlertMyStatusGet(c *gin.Context) {
 		out["last_alert_at"] = cfg.LastAlertAt
 	}
 	settings, _ := models.BalanceAlertSettingsGet(rt.Ctx)
-	platformTh, _, _ := balancealert.ComputeThreshold(acc.LastRecharge, acc.HasVoucher, settings.VoucherThresholdUSD)
+	platformTh, _, _ := balancealert.ComputeThreshold(acc.LastRecharge, acc.HasVoucher, settings.VoucherThresholdUSD, settings.LastRechargePct)
 	out["platform_threshold_usd"] = platformTh
 	out["threshold_usd"] = platformTh
 	if cfg != nil && cfg.IsCustomThreshold() {

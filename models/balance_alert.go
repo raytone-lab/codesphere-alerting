@@ -25,6 +25,7 @@ const (
 	TriggerTypeSurge   = "SURGE"
 
 	DefaultCriticalRepeatDays = 3
+	DefaultLastRechargePct    = 5
 	MaxBalanceAlertReceivers  = 5
 )
 
@@ -96,6 +97,7 @@ type BalanceAlertSettings struct {
 	SendMode             string   `json:"send_mode"`
 	PilotReceivers       []string `json:"pilot_receivers,omitempty"` // legacy; prefer PilotNotifyRuleID
 	VoucherThresholdUSD  float64  `json:"voucher_threshold_usd"`
+	LastRechargePct      float64  `json:"last_recharge_pct"`
 	CriticalRepeatDays   int      `json:"critical_repeat_days"`
 	DatasourceID         int64    `json:"datasource_id"`
 	SmsWebhook           string   `json:"sms_webhook,omitempty"` // legacy; prefer CustomerNotifyRuleID
@@ -103,6 +105,25 @@ type BalanceAlertSettings struct {
 	PilotNotifyRuleID    int64    `json:"pilot_notify_rule_id"`
 	CustomerNotifyRuleID int64    `json:"customer_notify_rule_id"`
 	DynamicNotifyRuleID  int64    `json:"dynamic_notify_rule_id"`
+}
+
+func lastRechargePctPresent(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	var probe map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &probe) != nil {
+		return false
+	}
+	_, ok := probe["last_recharge_pct"]
+	return ok
+}
+
+func clampStoredLastRechargePct(pct float64) float64 {
+	if pct <= 0 || pct > 100 {
+		return DefaultLastRechargePct
+	}
+	return pct
 }
 
 func boolPtr(v bool) *bool {
@@ -116,6 +137,7 @@ func DefaultBalanceAlertSettings() BalanceAlertSettings {
 		SendMode:            "OFF",
 		PilotReceivers:      []string{},
 		VoucherThresholdUSD: 20,
+		LastRechargePct:     DefaultLastRechargePct,
 		CriticalRepeatDays:  DefaultCriticalRepeatDays,
 	}
 }
@@ -150,6 +172,11 @@ func BalanceAlertSettingsGet(ctx *ctx.Context) (BalanceAlertSettings, error) {
 	if s.VoucherThresholdUSD <= 0 {
 		s.VoucherThresholdUSD = 20
 	}
+	if !lastRechargePctPresent(val) {
+		s.LastRechargePct = DefaultLastRechargePct
+	} else {
+		s.LastRechargePct = clampStoredLastRechargePct(s.LastRechargePct)
+	}
 	if s.CriticalRepeatDays <= 0 {
 		s.CriticalRepeatDays = DefaultCriticalRepeatDays
 	}
@@ -183,6 +210,9 @@ func BalanceAlertSettingsPut(ctx *ctx.Context, s BalanceAlertSettings, username 
 	}
 	if s.VoucherThresholdUSD <= 0 {
 		s.VoucherThresholdUSD = 20
+	}
+	if s.LastRechargePct <= 0 || s.LastRechargePct > 100 {
+		return errors.New("充值提醒比例必须大于 0 且不超过 100")
 	}
 	if s.CriticalRepeatDays <= 0 {
 		s.CriticalRepeatDays = DefaultCriticalRepeatDays

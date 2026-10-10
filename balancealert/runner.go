@@ -193,7 +193,7 @@ func (r *Runner) evalOne(acct Account, settings models.BalanceAlertSettings, con
 		}
 	}
 
-	platformTh, mode, skip := ComputeThreshold(acct.LastRecharge, acct.HasVoucher, settings.VoucherThresholdUSD)
+	platformTh, mode, skip := ComputeThreshold(acct.LastRecharge, acct.HasVoucher, settings.VoucherThresholdUSD, settings.LastRechargePct)
 	warnTh := platformTh
 	if cfg.IsCustomThreshold() {
 		warnTh = cfg.ThresholdFixedUSD

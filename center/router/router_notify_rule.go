@@ -175,8 +175,6 @@ func (rt *Router) notifyRulesGetByService(c *gin.Context) {
 
 func (rt *Router) notifyRulesGet(c *gin.Context) {
 	me := c.MustGet("user").(*models.User)
-	gids, err := models.MyGroupIds(rt.Ctx, me.Id)
-	ginx.Dangerous(err)
 
 	lst, err := models.NotifyRulesGet(rt.Ctx, "", nil)
 	ginx.Dangerous(err)
@@ -186,6 +184,18 @@ func (rt *Router) notifyRulesGet(c *gin.Context) {
 		ginx.NewRender(c).Data(lst, nil)
 		return
 	}
+
+	// 预付费余额预警【参数设置】下拉需要完整规则名；旧页仍打 /notify-rules。
+	canBalanceAlert, err := me.CheckPerm(rt.Ctx, "/system/balance-alert")
+	ginx.Dangerous(err)
+	if canBalanceAlert {
+		rt.fillNotifyConfigNames(lst)
+		ginx.NewRender(c).Data(lst, nil)
+		return
+	}
+
+	gids, err := models.MyGroupIds(rt.Ctx, me.Id)
+	ginx.Dangerous(err)
 
 	res := make([]*models.NotifyRule, 0)
 	for _, nr := range lst {

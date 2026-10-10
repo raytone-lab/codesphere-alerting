@@ -21,7 +21,7 @@ const (
 	DefaultVoucherThreshold = 20.0
 	HysteresisFactor        = 1.5
 	CriticalHalfFactor      = 0.5
-	LastRechargePct         = 0.05
+	DefaultLastRechargePct  = 5
 	DefaultCriticalRepeat   = 72 * time.Hour
 )
 
@@ -35,10 +35,17 @@ func mustLoadShanghai() *time.Location {
 	return loc
 }
 
+func lastRechargeRatio(pct float64) float64 {
+	if pct <= 0 || pct > 100 {
+		pct = DefaultLastRechargePct
+	}
+	return pct / 100
+}
+
 // ComputeThreshold implements FR-02. skip=true means no recharge and no voucher line.
-func ComputeThreshold(lastRechargeUSD *float64, hasVoucher bool, voucherThresholdUSD float64) (threshold float64, mode string, skip bool) {
+func ComputeThreshold(lastRechargeUSD *float64, hasVoucher bool, voucherThresholdUSD, lastRechargePct float64) (threshold float64, mode string, skip bool) {
 	if lastRechargeUSD != nil {
-		return *lastRechargeUSD * LastRechargePct, ModeLastRecharge5Pct, false
+		return *lastRechargeUSD * lastRechargeRatio(lastRechargePct), ModeLastRecharge5Pct, false
 	}
 	if hasVoucher && voucherThresholdUSD > 0 {
 		return voucherThresholdUSD, ModeVoucherFixed, false

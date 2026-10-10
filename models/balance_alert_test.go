@@ -29,7 +29,7 @@ func TestBalanceAlertSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get default: %v", err)
 	}
-	if got.SendMode != "OFF" || got.VoucherThresholdUSD != 20 || got.CriticalRepeatDays != 3 || !got.AlertEnabled() {
+	if got.SendMode != "OFF" || got.VoucherThresholdUSD != 20 || got.LastRechargePct != 5 || got.CriticalRepeatDays != 3 || !got.AlertEnabled() {
 		t.Fatalf("defaults: %+v", got)
 	}
 	if got.CriticalRepeatAfter() != 72*time.Hour {
@@ -64,6 +64,45 @@ func TestBalanceAlertSettingsRoundTrip(t *testing.T) {
 	}
 	if got.CriticalRepeatDays != 3 {
 		t.Fatalf("zero days should default to 3: %+v", got)
+	}
+
+	got.LastRechargePct = 0
+	if err := BalanceAlertSettingsPut(c, got, "root"); err == nil {
+		t.Fatal("pct 0 should be rejected")
+	}
+
+	got.LastRechargePct = 101
+	if err := BalanceAlertSettingsPut(c, got, "root"); err == nil {
+		t.Fatal("pct 101 should be rejected")
+	}
+	got.LastRechargePct = -1
+	if err := BalanceAlertSettingsPut(c, got, "root"); err == nil {
+		t.Fatal("pct -1 should be rejected")
+	}
+	got.LastRechargePct = 100
+	if err := BalanceAlertSettingsPut(c, got, "root"); err != nil {
+		t.Fatalf("put 100 pct: %v", err)
+	}
+	got, err = BalanceAlertSettingsGet(c)
+	if err != nil {
+		t.Fatalf("get 100 pct: %v", err)
+	}
+	if got.LastRechargePct != 100 {
+		t.Fatalf("100 pct should persist: %+v", got)
+	}
+	got.LastRechargePct = 5
+	if err := BalanceAlertSettingsPut(c, got, "root"); err != nil {
+		t.Fatalf("put 5 pct: %v", err)
+	}
+	if err := ConfigsSet(c, BalanceAlertSettingsKey, `{"send_mode":"PILOT","voucher_threshold_usd":20,"datasource_id":2}`); err != nil {
+		t.Fatalf("seed json without pct: %v", err)
+	}
+	got, err = BalanceAlertSettingsGet(c)
+	if err != nil {
+		t.Fatalf("get missing pct: %v", err)
+	}
+	if got.LastRechargePct != 5 {
+		t.Fatalf("missing pct should default to 5: %+v", got)
 	}
 
 	off := false

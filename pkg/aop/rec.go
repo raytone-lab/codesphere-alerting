@@ -46,14 +46,11 @@ func RecoveryWithWriter(out io.Writer) gin.HandlerFunc {
 			if err := recover(); err != nil {
 				// custom error
 				if e, ok := err.(errorx.PageError); ok {
-					if e.Code != 200 {
-						c.String(e.Code, i18nx.Translate(c.GetHeader("X-Language"), e.Message))
-					} else {
-						c.JSON(e.Code, gin.H{
-							"err":        i18nx.Translate(c.GetHeader("X-Language"), e.Message),
-							"request_id": c.GetString("trace_id"),
-						})
-					}
+					c.JSON(e.Code, gin.H{
+						"err":        i18nx.Translate(c.GetHeader("X-Language"), e.Message),
+						"dat":        nil,
+						"request_id": c.GetString("trace_id"),
+					})
 					c.Abort()
 					return
 				}

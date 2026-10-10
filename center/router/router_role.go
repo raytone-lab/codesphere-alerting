@@ -63,6 +63,19 @@ func filterSidebarPerms(lst []string) []string {
 	return out
 }
 
+// myBalanceAlertMenuPerm is the sidebar key for 我的余额告警. Any logged-in
+// user may open that self-service page, so /self/perms always includes it.
+const myBalanceAlertMenuPerm = "/system/enterprise-balance"
+
+func ensureMyBalanceAlertPerm(lst []string) []string {
+	for _, p := range lst {
+		if p == myBalanceAlertMenuPerm {
+			return lst
+		}
+	}
+	return append(lst, myBalanceAlertMenuPerm)
+}
+
 func (rt *Router) permsGets(c *gin.Context) {
 	user := c.MustGet("user").(*models.User)
 	if user.IsAdmin() {
@@ -72,12 +85,12 @@ func (rt *Router) permsGets(c *gin.Context) {
 				lst = append(lst, op.Name)
 			}
 		}
-		ginx.NewRender(c).Data(filterSidebarPerms(lst), nil)
+		ginx.NewRender(c).Data(ensureMyBalanceAlertPerm(filterSidebarPerms(lst)), nil)
 		return
 	}
 
 	lst, err := models.OperationsOfRole(rt.Ctx, strings.Fields(user.Roles))
-	ginx.NewRender(c).Data(filterSidebarPerms(lst), err)
+	ginx.NewRender(c).Data(ensureMyBalanceAlertPerm(filterSidebarPerms(lst)), err)
 }
 
 // 创建角色

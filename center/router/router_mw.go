@@ -352,6 +352,24 @@ func (rt *Router) perm(operation string) gin.HandlerFunc {
 	}
 }
 
+// permAny lets the request through if the user has any one of the operations.
+// Used when a shared list API serves both a dedicated menu (e.g. 通知规则)
+// and a dropdown on another page (预付费余额预警 参数设置).
+func (rt *Router) permAny(operations ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		me := c.MustGet("user").(*models.User)
+		for _, op := range operations {
+			can, err := me.CheckPerm(rt.Ctx, op)
+			ginx.Dangerous(err)
+			if can {
+				c.Next()
+				return
+			}
+		}
+		ginx.Bomb(http.StatusForbidden, "forbidden")
+	}
+}
+
 func (rt *Router) admin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userid := c.MustGet("userid").(int64)

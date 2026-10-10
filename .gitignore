@@ -42,14 +42,6 @@ _test
 /run
 /vendor
 /tmp
-/pub/*
-!/pub/index.html
-!/pub/balance-alert.html
-!/pub/enterprise-balance.html
-!/pub/assets/
-/pub/assets/*
-!/pub/assets/index-0720a85a.js
-!/pub/assets/ruidong-theme.css
 # bundled categraf packages, staged at release time by scripts/download_categraf.sh
 /agents
 /n9e

@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>预付费余额预警</title>
+  <link rel="stylesheet" href="/assets/ruidong-theme.css?v=theme4" />
+  <style>
+    :root {
+      --navy-900: #0e2a47;
+      --navy-800: #19295b;
+      --navy-muted: rgba(14, 42, 71, 0.62);
+      --navy-faint: rgba(14, 42, 71, 0.42);
+      --navy-line: rgba(14, 42, 71, 0.1);
+      --navy-line-soft: rgba(14, 42, 71, 0.06);
+      --gold: #e8b464;
+      --paper: #f7f5f1;
+      --surface: #fffefb;
+      --surface-warm: #faf6ee;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: var(--paper);
+      color: var(--navy-900);
+      font-family: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    }
+    body { padding: 20px 24px 16px; }
+    body.modal-open { overflow: hidden; }
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .hero {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 8px;
+      flex: 0 0 auto;
+    }
+    .hero h1 { margin: 0 0 6px; font-size: 22px; font-weight: 650; }
+    .hero p { margin: 0; color: var(--navy-muted); font-size: 13px; line-height: 1.6; max-width: 640px; }
+    .hero-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 0 0 12px;
+      flex: 0 0 auto;
+      min-height: 20px;
+    }
+    .summary { margin: 0; color: var(--navy-muted); font-size: 13px; min-width: 0; }
+    .summary b { color: var(--navy-900); }
+    .msg { margin: 0; font-size: 13px; flex: 0 1 auto; text-align: right; white-space: nowrap; }
+    .msg p { margin: 0; }
+    .msg .ok { color: #1f7a4d; }
+    .msg .err { color: #b42318; }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--navy-line);
+      border-radius: 14px;
+      box-shadow: 0 18px 50px -40px rgba(14, 42, 71, 0.45);
+      overflow: hidden;
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .panel-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 20px 12px;
+      border-bottom: 1px solid var(--navy-line-soft);
+      flex: 0 0 auto;
+    }
+    .panel-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+    .panel-head p { margin: 4px 0 0; color: var(--navy-faint); font-size: 12px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+    .list { list-style: none; margin: 0; padding: 0; }
+    .row {
+      display: grid;
+      grid-template-columns: 148px 1fr;
+      gap: 16px;
+      align-items: start;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--navy-line-soft);
+    }
+    .row:last-child { border-bottom: 0; }
+    .row .k { padding-top: 8px; color: var(--navy-muted); font-size: 13px; font-weight: 600; }
+    .row .v { min-width: 0; }
+    .row .note { margin: 6px 0 0; color: var(--navy-faint); font-size: 12px; line-height: 1.5; }
+    .table-wrap { flex: 1 1 auto; min-height: 0; overflow: auto; }
+    table.records {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    table.records th,
+    table.records td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--navy-line-soft);
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+    table.records tbody td {
+      padding-top: 9px;
+      padding-bottom: 9px;
+    }
+    table.records th {
+      background: var(--surface-warm);
+      color: var(--navy-900);
+      font-weight: 650;
+    }
+    table.records tbody tr:hover td { background: rgba(14, 42, 71, 0.03); }
+    .mono { font-variant-numeric: tabular-nums; }
+    .pager {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 4px 8px;
+      padding: 6px 12px;
+      border-top: 1px solid var(--navy-line-soft);
+      flex: 0 0 auto;
+      background: var(--surface-warm);
+      color: var(--navy-muted);
+      font-size: 12px;
+    }
+    .pager .pages { display: flex; align-items: center; gap: 4px; }
+    .pager button { height: 24px; min-width: 24px; padding: 0 8px; font-size: 12px; font-weight: 500; }
+    .pager select { width: auto; min-width: 72px; height: 24px; padding: 0 8px; font-size: 12px; }
+    input, select, textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #c9cdd3;
+      border-radius: 8px;
+      background: #fff;
+      color: var(--navy-900);
+      font: inherit;
+      font-size: 13px;
+    }
+    .toolbar input, .toolbar select { width: auto; min-width: 140px; }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--gold);
+      box-shadow: 0 0 0 2px rgba(232, 180, 100, 0.18);
+    }
+    .suffix { display: flex; align-items: center; gap: 8px; }
+    .suffix input { flex: 1; }
+    .suffix em { font-style: normal; color: var(--navy-faint); font-size: 12px; }
+    button {
+      height: 36px;
+      padding: 0 14px;
+      border: 1px solid var(--navy-line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--navy-900);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.primary { background: var(--navy-900); border-color: var(--navy-900); color: #fafaf7; }
+    button.ghost { background: transparent; }
+    button.tiny { height: 28px; padding: 0 8px; font-size: 12px; font-weight: 500; }
+    button:disabled { opacity: 0.55; cursor: default; }
+    .toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .toggle input { display: none; }
+    .toggle .track {
+      width: 40px;
+      height: 22px;
+      border-radius: 11px;
+      background: #c9cdd3;
+      position: relative;
+      transition: background 0.2s;
+    }
+    .toggle .track::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform 0.2s;
+    }
+    .toggle input:checked + .track { background: var(--navy-900); }
+    .toggle input:checked + .track::after { transform: translateX(18px); }
+    .toggle .text { font-size: 13px; color: var(--navy-900); }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .chip.warn { background: #fff4d6; color: #8a5a10; }
+    .chip.critical { background: #fde8e6; color: #b42318; }
+    .chip.off { background: #eef1f4; color: var(--navy-muted); }
+    .chip.pilot { background: rgba(232, 180, 100, 0.18); color: #9a6f1e; }
+    .chip.customer { background: #e8f1fb; color: #184a86; }
+    .chip.ok { background: #e8f6ee; color: #1f7a4d; }
+    .chip.fail { background: #fde8e6; color: #b42318; }
+    .empty { padding: 40px 20px; text-align: center; color: var(--navy-faint); font-size: 13px; }
+    .overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 16px;
+      background: rgba(14, 42, 71, 0.38);
+    }
+    .overlay.open { display: flex; }
+    .dialog {
+      width: min(720px, 100%);
+      max-height: 100%;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: var(--surface);
+      border: 1px solid var(--navy-line);
+      border-radius: 14px;
+      box-shadow: 0 24px 70px -32px rgba(14, 42, 71, 0.55);
+      overflow: hidden;
+    }
+    .dialog > form {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .dialog-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 20px 12px;
+      border-bottom: 1px solid var(--navy-line-soft);
+      flex: 0 0 auto;
+    }
+    .dialog-head h2 { margin: 0; font-size: 16px; }
+    .dialog-head p { margin: 4px 0 0; color: var(--navy-faint); font-size: 12px; }
+    .dialog-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+    }
+    .dialog-foot {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 12px 20px 16px;
+      border-top: 1px solid var(--navy-line-soft);
+      background: var(--surface-warm);
+      flex: 0 0 auto;
+    }
+    @media (max-width: 720px) {
+      .row { grid-template-columns: 1fr; gap: 6px; }
+      .row .k { padding-top: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="hero">
+      <div>
+        <h1>预付费余额预警</h1>
+        <p>每 15 分钟判定一轮。参数在「参数设置」中修改，保存后立即生效。</p>
+      </div>
+      <div class="hero-actions">
+        <button type="button" class="ghost" id="reload">刷新记录</button>
+        <button type="button" class="ghost" id="open-miss">漏报对账</button>
+        <button type="button" id="run">立即跑一轮</button>
+        <button type="button" class="primary" id="open-settings">参数设置</button>
+      </div>
+    </div>
+    <div class="status-row">
+      <p class="summary" id="summary">当前参数加载中…</p>
+      <div class="msg" id="msg"></div>
+    </div>
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>告警记录</h2>
+          <p>运营复核误报请点「误报」；判定无误点「正常」。</p>
+        </div>
+        <div class="toolbar">
+          <select id="filter-level">
+            <option value="">全部档位</option>
+            <option value="NORMAL">正常</option>
+            <option value="WARN">预警</option>
+            <option value="CRITICAL">紧急</option>
+          </select>
+          <select id="filter-status">
+            <option value="">全部状态</option>
+            <option value="RECORDED">已落库</option>
+            <option value="SENT">已发送</option>
+            <option value="SKIPPED_COOLDOWN">限频跳过</option>
+            <option value="FAILED">发送失败</option>
+          </select>
+          <input id="filter-account" placeholder="按企业账户筛选" />
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="records">
+          <thead>
+            <tr>
+              <th>告警日期</th>
+              <th>企业账户</th>
+              <th>档位</th>
+              <th>余额</th>
+              <th>提醒线</th>
+              <th>规则</th>
+              <th>发送</th>
+              <th>状态</th>
+              <th>通道</th>
+              <th>复核</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="pager" id="pager"></div>
+    </section>
+  </div>
+
+  <div class="overlay" id="overlay" hidden>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="dialog-head">
+        <div>
+          <h2 id="settings-title">参数设置</h2>
+          <p>修改参数配置，点击保存后立即生效。</p>
+        </div>
+        <button type="button" class="ghost" id="close-settings" aria-label="关闭">关闭</button>
+      </div>
+      <form id="settings">
+        <div class="dialog-body">
+          <ul class="list">
+            <li class="row">
+              <div class="k">预警开关</div>
+              <div class="v">
+                <label class="toggle">
+                  <input type="checkbox" id="alert-enabled" />
+                  <span class="track"></span>
+                  <span class="text" id="alert-enabled-label">已启用</span>
+                </label>
+                <p class="note">停用后不再圈选企业、不落库、不发短信/钉钉；启用后才按发送模式执行后续逻辑。</p>
+              </div>
+            </li>
+            <li class="row">
+              <div class="k">发送模式</div>
+              <div class="v">
+                <select name="send_mode">
+                  <option value="OFF">仅落库</option>
+                  <option value="PILOT">试点 · 内部钉钉</option>
+                  <option value="CUSTOMER">正式 · 客户短信</option>
+                </select>
+                <p class="note">OFF 只落库，PILOT 发运营钉钉群，CUSTOMER 发企业绑定手机号。</p>
+              </div>
+            </li>
+            <li class="row">
+              <div class="k">纯赠额提醒线</div>
+              <div class="v">
+                <div class="suffix">
+                  <input name="voucher_threshold_usd" type="number" step="0.01" min="0" />
+                  <em>元</em>
+                </div>
+                <p class="note">无充值记录的企业使用该固定线；有充值后自动改为上次充值 × 下方比例。</p>
+              </div>
+            </li>
+            <li class="row">
+              <div class="k">充值提醒比例</div>
+              <div class="v">
+                <div class="suffix">
+                  <input name="last_recharge_pct" type="number" step="any" min="0.01" max="100" required />
+                  <em>%</em>
+                </div>
+                <p class="note">有充值记录的企业：提醒线 = 上次充值金额 × 该比例。大于 0 且不超过 100，默认 5%。</p>
+              </div>
+            </li>
+            <li class="row">
+              <div class="k">紧急重复间隔</div>
+              <div class="v">
+                <div class="suffix">
+                  <input name="critical_repeat_days" type="number" step="1" min="1" />
+                  <em>天</em>
+                </div>
+                <p class="note">CRITICAL 持续未充值时，间隔多少天再提醒一次。默认 3 天，试点期可调。</p>
+              </div>
+            </li>
+            <li class="row">
+              <div class="k">试点通知规则</div>
+              <div class="v">
+                <select name="pilot_notify_rule_id">
+                  <option value="0">请选择通知规则</option>
+                </select>
+                <p class="note">PILOT 模式走该规则里配置的钉钉媒介与消息模板（告警通知 → 通知规则）。未选时回退到下方遗留 Webhook。</p>
+              </div>
+            </li>
+            <li class="row">
+              <div class="k">客户通知规则</div>
+              <div class="v">
+                <select name="customer_notify_rule_id">
+                  <option value="0">请选择通知规则</option>
+                </select>
+                <p class="note">CUSTOMER 模式走该规则里的短信媒介与模板；手机号取计费账户 owner 的 users.phone。</p>
+              </div>
+            </li>
+            <li class="row">
+              <div class="k">数据源</div>
+              <div class="v">
+                <select name="datasource_id">
+                  <option value="0">请选择数据源</option>
+                </select>
+                <p class="note">选项来自集成中心已启用的 PostgreSQL 数据源（codesphere-billing 库）；库名、账号、密码使用该数据源配置。</p>
+              </div>
+            </li>
+          </ul>
+        </div>
+        <div class="dialog-foot">
+          <button type="button" class="ghost" id="cancel-settings">取消</button>
+          <button type="submit" class="primary" id="save-settings">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="overlay" id="miss-overlay" hidden>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="miss-title">
+      <div class="dialog-head">
+        <div>
+          <h2 id="miss-title">漏报对账</h2>
+          <p>扫描余额 ≤ 0 的预付费企业，回查过去 7 天有无预警/紧急记录。漏报应为 0。</p>
+        </div>
+        <button type="button" class="ghost" id="close-miss" aria-label="关闭">关闭</button>
+      </div>
+      <div class="dialog-body">
+        <p class="note" id="miss-summary" style="padding:12px 20px 0;">对账结果加载中…</p>
+        <div class="table-wrap" style="max-height:360px;">
+          <table class="records">
+            <thead>
+              <tr>
+                <th>企业账户</th>
+                <th>名称</th>
+                <th>余额</th>
+                <th>当前状态</th>
+                <th>原因</th>
+              </tr>
+            </thead>
+            <tbody id="miss-rows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="dialog-foot">
+        <button type="button" class="ghost" id="cancel-miss">关闭</button>
+        <button type="button" class="primary" id="refresh-miss">重新对账</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    const token = localStorage.getItem("access_token") || "";
+    const api = (path, opts = {}) => fetch("/api/n9e" + path, {
+      ...opts,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + token,
+        ...(opts.headers || {})
+      }
+    }).then(async r => {
+      const raw = await r.text();
+      let j = null;
+      try {
+        j = raw ? JSON.parse(raw) : {};
+      } catch (e) {
+        throw new Error(raw || ("HTTP " + r.status));
+      }
+      const err = (j && (j.err || (j.error && (j.error.message || j.error)))) || "";
+      if (err) throw new Error(typeof err === "string" ? err : JSON.stringify(err));
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return j.dat !== undefined ? j.dat : j.data;
+    });
+    const $ = (s) => document.querySelector(s);
+    const msg = (t, ok) => { $("#msg").innerHTML = t ? `<p class="${ok ? "ok" : "err"}">${t}</p>` : ""; };
+    const form = $("#settings");
+    const overlay = $("#overlay");
+    const LEVEL = { NORMAL: "正常", WARN: "预警", CRITICAL: "紧急" };
+    const MODE = { OFF: "仅落库", PILOT: "试点钉钉", CUSTOMER: "客户短信" };
+    const STATUS = {
+      RECORDED: "已落库",
+      SENT: "已发送",
+      FAILED: "发送失败",
+      COOLDOWN: "限频跳过",
+      SKIPPED: "已跳过",
+      SKIPPED_COOLDOWN: "限频跳过"
+    };
+    const RULE = {
+      RECHARGE_PCT: "充值比例线",
+      RECHARGE_5PCT: "充值比例线",
+      LAST_RECHARGE_5PCT: "充值比例线",
+      VOUCHER_FIXED: "纯赠额固定线",
+      CUSTOM: "企业自定义",
+      DYNAMIC: "动态预估",
+      SURGE: "用量激增"
+    };
+    function rechargePct() {
+      const n = Number(currentSettings && currentSettings.last_recharge_pct);
+      return n > 0 ? n : 5;
+    }
+    function ruleLabel(mode) {
+      if (mode === "RECHARGE_PCT" || mode === "RECHARGE_5PCT" || mode === "LAST_RECHARGE_5PCT") {
+        return "充值 × " + rechargePct() + "%";
+      }
+      return RULE[mode] || mode || "—";
+    }
+    const fmtTime = (v) => {
+      if (!v) return "—";
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) return String(v).replace("T", " ").replace("Z", "");
+      const p = (n) => String(n).padStart(2, "0");
+      return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+    };
+    const money = (n) => Number(n || 0).toFixed(2);
+    const chip = (cls, text) => `<span class="chip ${cls}">${text}</span>`;
+    const esc = (s) => String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    let records = [];
+    let datasources = [];
+    let notifyRules = [];
+    let disabledDatasourceIds = {};
+    let currentSettings = null;
+    let page = 1;
+    let pageSize = 10;
+    function datasourceLabel(id) {
+      if (!id) return "—";
+      const ds = datasources.find((d) => String(d.id) === String(id));
+      return ds && ds.name ? ds.name : String(id);
+    }
+    function notifyRuleLabel(id) {
+      if (!id) return "—";
+      const r = notifyRules.find((x) => String(x.id) === String(id));
+      return r && r.name ? r.name : ("#" + id);
+    }
+    function datasourceOptionLabel(ds) {
+      const name = ds.name || ("#" + ds.id);
+      const type = ds.plugin_type_name || ds.plugin_type || "";
+      return name + (type ? " · " + type : "");
+    }
+    function fillNotifyRuleSelect(sel, selectedId) {
+      const current = selectedId != null ? String(selectedId || 0) : String(sel.value || 0);
+      const opts = ['<option value="0">请选择通知规则</option>'];
+      const seen = {};
+      notifyRules.forEach((r) => {
+        const id = String(r.id);
+        seen[id] = true;
+        opts.push(`<option value="${esc(id)}">${esc(r.name || ("#" + id))}</option>`);
+      });
+      if (current && current !== "0" && !seen[current]) {
+        opts.push(`<option value="${esc(current)}">#${esc(current)}（已保存）</option>`);
+      }
+      sel.innerHTML = opts.join("");
+      sel.value = [...sel.options].some((o) => o.value === current) ? current : "0";
+    }
+    function fillDatasourceSelect(selectedId) {
+      const sel = form.datasource_id;
+      const current = selectedId != null ? String(selectedId || 0) : String(sel.value || 0);
+      const opts = ['<option value="0">请选择数据源</option>'];
+      const seen = {};
+      datasources.forEach((ds) => {
+        const id = String(ds.id);
+        seen[id] = true;
+        opts.push(`<option value="${esc(id)}">${esc(datasourceOptionLabel(ds))}</option>`);
+      });
+      if (current && current !== "0" && !seen[current] && !disabledDatasourceIds[current]) {
+        opts.push(`<option value="${esc(current)}">#${esc(current)}（已保存）</option>`);
+      }
+      sel.innerHTML = opts.join("");
+      sel.value = [...sel.options].some((o) => o.value === current) ? current : "0";
+    }
+    async function loadDatasources() {
+      const lst = await api("/datasource/list", { method: "POST", body: JSON.stringify({}) });
+      const all = Array.isArray(lst) ? lst : [];
+      disabledDatasourceIds = {};
+      datasources = all.filter((d) => {
+        if (d.status !== "enabled") {
+          disabledDatasourceIds[String(d.id)] = true;
+          return false;
+        }
+        return d.plugin_type === "pgsql";
+      });
+      fillDatasourceSelect(currentSettings && currentSettings.datasource_id);
+    }
+    async function loadNotifyRules() {
+      const lst = await api("/balance-alert/notify-rules");
+      notifyRules = Array.isArray(lst) ? lst.filter((r) => r && r.enable !== false) : [];
+      fillNotifyRuleSelect(form.pilot_notify_rule_id, currentSettings && currentSettings.pilot_notify_rule_id);
+      fillNotifyRuleSelect(form.customer_notify_rule_id, currentSettings && currentSettings.customer_notify_rule_id);
+    }
+    function renderSummary(s) {
+      if (!s) {
+        $("#summary").textContent = "当前参数未加载";
+        return;
+      }
+      const on = s.enabled !== false;
+      $("#summary").innerHTML = "当前：" +
+        "<b>" + (on ? "已启用" : "已停用") + "</b>" +
+        " · " +
+        "<b>" + esc(MODE[s.send_mode] || s.send_mode || "仅落库") + "</b>" +
+        " · 提醒线 <b>" + money(s.voucher_threshold_usd || 20) + "</b> 元" +
+        " · 充值比例 <b>" + String(s.last_recharge_pct || 5) + "%</b>" +
+        " · 紧急重复 <b>" + String(s.critical_repeat_days || 3) + "</b> 天" +
+        " · 数据源 <b>" + esc(datasourceLabel(s.datasource_id)) + "</b>" +
+        " · 试点规则 <b>" + esc(notifyRuleLabel(s.pilot_notify_rule_id)) + "</b>" +
+        " · 客户规则 <b>" + esc(notifyRuleLabel(s.customer_notify_rule_id)) + "</b>";
+    }
+    function fillForm(s) {
+      const on = s.enabled !== false;
+      $("#alert-enabled").checked = on;
+      $("#alert-enabled-label").textContent = on ? "已启用" : "已停用";
+      form.send_mode.value = s.send_mode || "OFF";
+      form.voucher_threshold_usd.value = s.voucher_threshold_usd || 20;
+      form.last_recharge_pct.value = s.last_recharge_pct || 5;
+      form.critical_repeat_days.value = s.critical_repeat_days || 3;
+      fillDatasourceSelect(s.datasource_id || 0);
+      fillNotifyRuleSelect(form.pilot_notify_rule_id, s.pilot_notify_rule_id || 0);
+      fillNotifyRuleSelect(form.customer_notify_rule_id, s.customer_notify_rule_id || 0);
+    }
+    async function loadSettings() {
+      try {
+        await Promise.all([loadDatasources(), loadNotifyRules()]);
+      } catch (e) {
+        datasources = datasources || [];
+        notifyRules = notifyRules || [];
+        fillDatasourceSelect(0);
+        fillNotifyRuleSelect(form.pilot_notify_rule_id, 0);
+        fillNotifyRuleSelect(form.customer_notify_rule_id, 0);
+        msg("列表加载失败：" + e.message, false);
+      }
+      currentSettings = await api("/balance-alert/settings");
+      fillForm(currentSettings);
+      renderSummary(currentSettings);
+      return currentSettings;
+    }
+    function openSettings() {
+      overlay.hidden = false;
+      overlay.classList.add("open");
+      document.body.classList.add("modal-open");
+      loadSettings().catch((e) => msg(e.message, false));
+    }
+    function closeSettings() {
+      overlay.classList.remove("open");
+      overlay.hidden = true;
+      document.body.classList.remove("modal-open");
+    }
+    function filteredRecords() {
+      const level = $("#filter-level").value;
+      const status = $("#filter-status").value;
+      const account = ($("#filter-account").value || "").trim().toLowerCase();
+      return (records || []).filter((r) => {
+        if (level && r.level !== level) return false;
+        if (status && r.status !== status) return false;
+        if (account && String(r.billing_account_id || "").toLowerCase().indexOf(account) === -1) return false;
+        return true;
+      }).sort((a, b) => {
+        const ta = new Date(a.created_at || 0).getTime();
+        const tb = new Date(b.created_at || 0).getTime();
+        if (tb !== ta) return tb - ta;
+        return String(b.id || "").localeCompare(String(a.id || ""));
+      });
+    }
+    function renderPager(total) {
+      const pages = Math.max(1, Math.ceil(total / pageSize) || 1);
+      if (page > pages) page = pages;
+      $("#pager").innerHTML =
+        `<span>共 ${total} 条</span>` +
+        `<div class="pages">` +
+        `<button type="button" id="page-prev" ${page <= 1 ? "disabled" : ""}>上一页</button>` +
+        `<span>第 ${page} / ${pages} 页</span>` +
+        `<button type="button" id="page-next" ${page >= pages ? "disabled" : ""}>下一页</button>` +
+        `</div>` +
+        `<select id="page-size">` +
+        [10, 20, 50].map((n) => `<option value="${n}" ${n === pageSize ? "selected" : ""}>${n} 条/页</option>`).join("") +
+        `</select>`;
+      $("#page-prev").onclick = () => { if (page > 1) { page -= 1; renderRecords(); } };
+      $("#page-next").onclick = () => { if (page < pages) { page += 1; renderRecords(); } };
+      $("#page-size").onchange = () => {
+        pageSize = Number($("#page-size").value) || 10;
+        page = 1;
+        renderRecords();
+      };
+    }
+    function renderRecords() {
+      const lst = filteredRecords();
+      const pages = Math.max(1, Math.ceil(lst.length / pageSize) || 1);
+      if (page > pages) page = pages;
+      const start = (page - 1) * pageSize;
+      const slice = lst.slice(start, start + pageSize);
+      if (!slice.length) {
+        $("#rows").innerHTML = `<tr><td colspan="10"><div class="empty">暂无告警记录</div></td></tr>`;
+        renderPager(lst.length);
+        return;
+      }
+      $("#rows").innerHTML = slice.map((r) => {
+        const levelCls = r.level === "CRITICAL" ? "critical" : r.level === "WARN" ? "warn" : "ok";
+        const modeCls = r.send_mode === "CUSTOMER" ? "customer" : r.send_mode === "PILOT" ? "pilot" : "off";
+        const statusCls = r.status === "SENT" || r.status === "RECORDED" ? "ok" : r.status === "FAILED" ? "fail" : "off";
+        const review = r.operator_review === "FALSE_ALARM" ? "误报" : r.operator_review === "OK" ? "正常" : "";
+        const channel = [r.channel, r.receiver].filter(Boolean).join(" ") || "—";
+        return `<tr>
+          <td class="mono">${fmtTime(r.created_at)}</td>
+          <td>${esc(r.billing_account_id || "—")}</td>
+          <td>${chip(levelCls, LEVEL[r.level] || r.level)}</td>
+          <td class="mono">${money(r.balance_usd)}</td>
+          <td class="mono">${money(r.threshold_usd)}</td>
+          <td>${esc(ruleLabel(r.threshold_mode))}</td>
+          <td>${chip(modeCls, MODE[r.send_mode] || r.send_mode)}</td>
+          <td>${chip(statusCls, STATUS[r.status] || r.status)}</td>
+          <td>${esc(channel)}</td>
+          <td>
+            <button class="tiny" data-id="${esc(r.id)}" data-v="OK">正常</button>
+            <button class="tiny" data-id="${esc(r.id)}" data-v="FALSE_ALARM">误报</button>
+            ${review ? `<span class="chip off">${review}</span>` : ""}
+          </td>
+        </tr>`;
+      }).join("");
+      renderPager(lst.length);
+    }
+    async function loadRecords() {
+      records = await api("/balance-alert/records?limit=500") || [];
+      page = 1;
+      renderRecords();
+    }
+    const missOverlay = $("#miss-overlay");
+    function openMiss() {
+      missOverlay.hidden = false;
+      missOverlay.classList.add("open");
+      document.body.classList.add("modal-open");
+      loadMisses().catch((e) => msg(e.message, false));
+    }
+    function closeMiss() {
+      missOverlay.classList.remove("open");
+      missOverlay.hidden = true;
+      document.body.classList.remove("modal-open");
+    }
+    async function loadMisses() {
+      const res = await api("/balance-alert/miss-reports?days=7") || {};
+      if (res.disabled) {
+        $("#miss-summary").textContent = "预警已停用，未执行对账。";
+        $("#miss-rows").innerHTML = `<tr><td colspan="5"><div class="empty">预警已停用</div></td></tr>`;
+        return;
+      }
+      const misses = Array.isArray(res.misses) ? res.misses : [];
+      $("#miss-summary").textContent = "扫描 " + (res.prepaid_scanned || 0) + " 家预付费企业，漏报 " + misses.length + " 家（回看 " + (res.lookback_days || 7) + " 天）。";
+      if (!misses.length) {
+        $("#miss-rows").innerHTML = `<tr><td colspan="5"><div class="empty">无漏报</div></td></tr>`;
+        return;
+      }
+      $("#miss-rows").innerHTML = misses.map((m) => `<tr>
+        <td>${esc(m.billing_account_id || "—")}</td>
+        <td>${esc(m.name || "—")}</td>
+        <td class="mono">${money(m.balance_usd)}</td>
+        <td>${esc(LEVEL[m.current_state] || m.current_state || "—")}</td>
+        <td>${esc(m.reason || "—")}</td>
+      </tr>`).join("");
+    }
+    $("#open-miss").onclick = openMiss;
+    $("#close-miss").onclick = closeMiss;
+    $("#cancel-miss").onclick = closeMiss;
+    $("#refresh-miss").onclick = () => loadMisses().then(() => msg("漏报对账已刷新", true)).catch((e) => msg(e.message, false));
+    missOverlay.addEventListener("click", (e) => {
+      if (e.target === missOverlay) closeMiss();
+    });
+    const pctInput = form.last_recharge_pct;
+    const syncPctValidity = () => {
+      pctInput.setCustomValidity("");
+      if (pctInput.validity.rangeUnderflow) {
+        pctInput.setCustomValidity("值必须大于0");
+      }
+    };
+    pctInput.addEventListener("input", syncPctValidity);
+    pctInput.addEventListener("invalid", syncPctValidity);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = $("#save-settings");
+      btn.disabled = true;
+      try {
+        const lastRechargePct = Number(form.last_recharge_pct.value);
+        if (!Number.isFinite(lastRechargePct) || lastRechargePct <= 0) {
+          throw new Error("值必须大于0");
+        }
+        if (lastRechargePct > 100) {
+          throw new Error("充值提醒比例必须大于 0 且不超过 100");
+        }
+        await api("/balance-alert/settings", {
+          method: "PUT",
+          body: JSON.stringify({
+            ...(currentSettings || {}),
+            enabled: $("#alert-enabled").checked,
+            send_mode: form.send_mode.value,
+            voucher_threshold_usd: Number(form.voucher_threshold_usd.value),
+            last_recharge_pct: lastRechargePct,
+            critical_repeat_days: Number(form.critical_repeat_days.value),
+            pilot_notify_rule_id: Number(form.pilot_notify_rule_id.value || 0),
+            customer_notify_rule_id: Number(form.customer_notify_rule_id.value || 0),
+            datasource_id: Number(form.datasource_id.value || 0)
+          })
+        });
+        await loadSettings();
+        closeSettings();
+        msg("设置已保存并生效", true);
+      } catch (err) {
+        msg(err.message, false);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    $("#open-settings").onclick = openSettings;
+    $("#close-settings").onclick = closeSettings;
+    $("#cancel-settings").onclick = closeSettings;
+    $("#alert-enabled").addEventListener("change", function() {
+      $("#alert-enabled-label").textContent = this.checked ? "已启用" : "已停用";
+    });
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeSettings();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && overlay.classList.contains("open")) closeSettings();
+      if (e.key === "Escape" && missOverlay.classList.contains("open")) closeMiss();
+    });
+    $("#run").onclick = async () => {
+      try {
+        const s = await api("/balance-alert/run", { method: "POST" });
+        if (s && s.disabled) {
+          msg("预警已停用，本轮未执行", true);
+        } else {
+          msg("本轮完成：圈选 " + s.prepaid + " 家，发送 " + s.sent + "，限频 " + s.cooldown + "，失败 " + s.failed, true);
+        }
+        await loadRecords();
+      } catch (err) { msg(err.message, false); }
+    };
+    $("#reload").onclick = () => loadRecords().then(() => msg("记录已刷新", true)).catch((e) => msg(e.message, false));
+    ["filter-level", "filter-status", "filter-account"].forEach((id) => {
+      $("#" + id).addEventListener("input", () => { page = 1; renderRecords(); });
+      $("#" + id).addEventListener("change", () => { page = 1; renderRecords(); });
+    });
+    document.addEventListener("click", async (e) => {
+      const b = e.target.closest("button[data-id]");
+      if (!b) return;
+      try {
+        await api("/balance-alert/records/" + b.dataset.id + "/review", {
+          method: "PUT",
+          body: JSON.stringify({ operator_review: b.dataset.v })
+        });
+        await loadRecords();
+      } catch (err) { msg(err.message, false); }
+    });
+    if (!token) {
+      msg("未登录，请先打开主站登录后再访问本页", false);
+    } else {
+      loadSettings().then(loadRecords).catch((e) => msg(e.message, false));
+    }
+  </script>
+</body>
+</html>

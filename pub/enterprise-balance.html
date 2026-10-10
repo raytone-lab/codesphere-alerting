@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>我的余额告警</title>
+  <link rel="stylesheet" href="/assets/ruidong-theme.css?v=theme4" />
+  <style>
+    :root {
+      --navy-900: #0e2a47;
+      --navy-800: #19295b;
+      --navy-muted: rgba(14, 42, 71, 0.62);
+      --navy-faint: rgba(14, 42, 71, 0.42);
+      --navy-line: rgba(14, 42, 71, 0.1);
+      --navy-line-soft: rgba(14, 42, 71, 0.06);
+      --gold: #e8b464;
+      --paper: #f7f5f1;
+      --surface: #fffefb;
+      --surface-warm: #faf6ee;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: var(--paper);
+      color: var(--navy-900);
+      font-family: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    }
+    body { padding: 20px 24px 16px; }
+    .page {
+      max-width: 960px;
+      margin: 0 auto;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: auto;
+    }
+    .hero {
+      flex: 0 0 auto;
+      margin-bottom: 16px;
+    }
+    .hero h1 { margin: 0 0 4px; font-size: 22px; font-weight: 650; }
+    .hero p { margin: 0; color: var(--navy-muted); font-size: 13px; line-height: 1.6; }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin: 14px 0 0;
+      border-bottom: 1px solid var(--navy-line);
+    }
+    .tabs button {
+      height: 36px;
+      padding: 0 16px;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      border-radius: 8px 8px 0 0;
+      background: transparent;
+      color: var(--navy-muted);
+      font-weight: 600;
+      margin-bottom: -1px;
+    }
+    .tabs button.active {
+      color: var(--navy-900);
+      border-bottom-color: var(--navy-900);
+      background: transparent;
+    }
+    .panel { display: none; min-height: 0; flex: 1; }
+    .panel.active { display: flex; flex-direction: column; }
+    .panel .card { flex: 0 0 auto; }
+    .panel .card.records-card {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      margin-bottom: 0;
+    }
+    .panel .card.records-card .card-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .msg { margin: 0 0 12px; font-size: 13px; min-height: 20px; }
+    .msg .ok { color: #1f7a4d; }
+    .msg .err { color: #b42318; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--navy-line);
+      border-radius: 14px;
+      box-shadow: 0 18px 50px -40px rgba(14, 42, 71, 0.45);
+      overflow: hidden;
+      margin-bottom: 16px;
+      flex: 0 0 auto;
+    }
+    .card-head {
+      padding: 16px 20px 12px;
+      border-bottom: 1px solid var(--navy-line-soft);
+    }
+    .card-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+    .card-head p { margin: 4px 0 0; color: var(--navy-faint); font-size: 12px; }
+    .card-body { padding: 0; }
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0;
+    }
+    .status-item {
+      padding: 16px 20px;
+      border-right: 1px solid var(--navy-line-soft);
+      border-bottom: 1px solid var(--navy-line-soft);
+    }
+    .status-item:nth-child(even) { border-right: 0; }
+    .status-item .label { color: var(--navy-faint); font-size: 12px; margin-bottom: 4px; }
+    .status-item .value { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+    .status-item .sub { font-size: 12px; color: var(--navy-muted); margin-top: 2px; }
+    .list { list-style: none; margin: 0; padding: 0; }
+    .row {
+      display: grid;
+      grid-template-columns: 148px 1fr;
+      gap: 16px;
+      align-items: start;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--navy-line-soft);
+    }
+    .row:last-child { border-bottom: 0; }
+    .row .k { padding-top: 8px; color: var(--navy-muted); font-size: 13px; font-weight: 600; }
+    .row .v { min-width: 0; }
+    .row .note { margin: 6px 0 0; color: var(--navy-faint); font-size: 12px; line-height: 1.5; }
+    input, select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #c9cdd3;
+      border-radius: 8px;
+      background: #fff;
+      color: var(--navy-900);
+      font: inherit;
+      font-size: 13px;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--gold);
+      box-shadow: 0 0 0 2px rgba(232, 180, 100, 0.18);
+    }
+    .suffix { display: flex; align-items: center; gap: 8px; }
+    .suffix input { flex: 1; }
+    .suffix em { font-style: normal; color: var(--navy-faint); font-size: 12px; }
+    button {
+      height: 36px;
+      padding: 0 14px;
+      border: 1px solid var(--navy-line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--navy-900);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.primary { background: var(--navy-900); border-color: var(--navy-900); color: #fafaf7; }
+    button.ghost { background: transparent; }
+    button.tiny { height: 28px; padding: 0 8px; font-size: 12px; font-weight: 500; }
+    button:disabled { opacity: 0.55; cursor: default; }
+    input:read-only { background: var(--surface-warm); }
+    #resend-otp-btn { min-width: 96px; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .chip.normal { background: #e8f6ee; color: #1f7a4d; }
+    .chip.warn { background: #fff4d6; color: #8a5a10; }
+    .chip.critical { background: #fde8e6; color: #b42318; }
+    .chip.static { background: #e8f1fb; color: #184a86; }
+    .chip.dynamic { background: rgba(232, 180, 100, 0.18); color: #9a6f1e; }
+    .chip.sent { background: #e8f6ee; color: #1f7a4d; }
+    .chip.failed { background: #fde8e6; color: #b42318; }
+    .chip.skipped { background: #eef1f4; color: var(--navy-muted); }
+    .toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .toggle input { display: none; }
+    .toggle .track {
+      width: 40px;
+      height: 22px;
+      border-radius: 11px;
+      background: #c9cdd3;
+      position: relative;
+      transition: background 0.2s;
+    }
+    .toggle .track::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform 0.2s;
+    }
+    .toggle input:checked + .track { background: var(--navy-900); }
+    .toggle input:checked + .track::after { transform: translateX(18px); }
+    .toggle .text { font-size: 13px; color: var(--navy-900); }
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 30px;
+      padding: 0 10px;
+      border-radius: 8px;
+      background: var(--surface-warm);
+      border: 1px solid var(--navy-line);
+      font-size: 13px;
+      color: var(--navy-900);
+    }
+    .tag .remove {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--navy-line);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 11px;
+      line-height: 1;
+      color: var(--navy-muted);
+    }
+    .tag .remove:hover { background: #b42318; color: #fff; }
+    .add-phone {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .add-phone input { max-width: 200px; }
+    .save-bar {
+      padding: 12px 20px;
+      border-top: 1px solid var(--navy-line-soft);
+      background: var(--surface-warm);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .table-wrap { overflow: auto; flex: 1; min-height: 240px; }
+    table.records {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    table.records th,
+    table.records td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--navy-line-soft);
+      white-space: nowrap;
+    }
+    table.records th {
+      background: var(--surface-warm);
+      font-weight: 650;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    table.records tbody tr:hover td { background: rgba(14, 42, 71, 0.03); }
+    .mono { font-variant-numeric: tabular-nums; }
+    .empty { padding: 40px 20px; text-align: center; color: var(--navy-faint); font-size: 13px; }
+    .pager {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 4px 8px;
+      padding: 8px 12px;
+      border-top: 1px solid var(--navy-line-soft);
+      background: var(--surface-warm);
+      color: var(--navy-muted);
+      font-size: 12px;
+    }
+    .pager button { height: 24px; min-width: 24px; padding: 0 8px; font-size: 12px; }
+    .no-account {
+      padding: 60px 20px;
+      text-align: center;
+      color: var(--navy-muted);
+      font-size: 14px;
+    }
+    @media (max-width: 720px) {
+      .row { grid-template-columns: 1fr; gap: 6px; }
+      .row .k { padding-top: 0; }
+      .status-grid { grid-template-columns: 1fr; }
+      .status-item { border-right: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="hero">
+      <h1>我的余额告警</h1>
+      <p>查看本企业余额与告警记录。警戒线、接收手机号请到「预警设置」修改。</p>
+      <div class="tabs" id="tabs" hidden>
+        <button type="button" class="active" data-tab="records" id="tab-records">告警记录</button>
+        <button type="button" data-tab="settings" id="tab-settings">预警设置</button>
+      </div>
+    </div>
+    <div class="msg" id="msg"></div>
+
+    <div id="content" style="display:none; flex:1; min-height:0; flex-direction:column;">
+      <div class="panel active" id="panel-records">
+      <div class="card">
+        <div class="card-head">
+          <h2>当前状态</h2>
+          <p id="enterprise-name"></p>
+        </div>
+        <div class="card-body">
+          <div class="status-grid" id="status-grid"></div>
+        </div>
+      </div>
+
+      <div class="card records-card">
+        <div class="card-head">
+          <h2>历史告警记录</h2>
+          <p>本企业余额预警的发送记录</p>
+        </div>
+        <div class="card-body">
+          <div class="table-wrap">
+            <table class="records">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>档位</th>
+                  <th>触发类型</th>
+                  <th>余额</th>
+                  <th>警戒线</th>
+                  <th>状态</th>
+                  <th>通知渠道</th>
+                </tr>
+              </thead>
+              <tbody id="record-rows"></tbody>
+            </table>
+          </div>
+          <div class="pager" id="pager"></div>
+        </div>
+      </div>
+      </div>
+
+      <div class="panel" id="panel-settings">
+      <div class="card">
+        <div class="card-head">
+          <h2>预警配置</h2>
+          <p>只影响本企业。修改后点击保存立即生效</p>
+        </div>
+        <div class="card-body">
+          <ul class="list">
+            <li class="row">
+              <div class="k">预警开关</div>
+              <div class="v">
+                <label class="toggle">
+                  <input type="checkbox" id="warn-toggle" />
+                  <span class="track"></span>
+                  <span class="text" id="warn-label">已开启</span>
+                </label>
+                <p class="note">关闭后不再发送预警档短信；紧急档仍由平台兜底，不可关闭。</p>
+              </div>
+            </li>
+            <li class="row">
+              <div class="k">自定义警戒线</div>
+              <div class="v">
+                <label class="toggle">
+                  <input type="checkbox" id="custom-threshold-toggle" />
+                  <span class="track"></span>
+                  <span class="text" id="threshold-label">使用平台默认规则</span>
+                </label>
+                <div id="threshold-input-wrap" style="margin-top:10px; display:none;">
+                  <div class="suffix">
+                    <input type="number" id="threshold-amount" step="0.01" min="0" placeholder="输入金额" />
+                    <em>元</em>
+                  </div>
+                </div>
+                <p class="note" id="threshold-note">关闭时按平台默认规则；开启后金额必须高于平台默认线，仅预警档生效。</p>
+              </div>
+            </li>
+            <li class="row">
+              <div class="k">接收手机号</div>
+              <div class="v">
+                <div class="tags" id="phone-tags"></div>
+                <div class="add-phone">
+                  <input type="tel" id="phone-input" placeholder="输入手机号" maxlength="11" />
+                  <button type="button" class="tiny" id="add-phone-btn">添加</button>
+                </div>
+                <div class="add-phone" id="otp-wrap" style="display:none; margin-top:8px;">
+                  <input type="text" id="otp-code" placeholder="短信验证码" maxlength="6" />
+                  <button type="button" class="tiny" id="verify-otp-btn">确认</button>
+                  <button type="button" class="tiny ghost" id="resend-otp-btn">重发</button>
+                </div>
+                <p class="note">预警短信将发送到这些手机号，最多 5 个。新增号码需短信验证。企业绑定手机号：<span id="current-phone">—</span></p>
+              </div>
+            </li>
+            <li class="row">
+              <div class="k">动态预警</div>
+              <div class="v">
+                <label class="toggle">
+                  <input type="checkbox" id="dynamic-toggle" />
+                  <span class="track"></span>
+                  <span class="text" id="dynamic-label">已关闭</span>
+                </label>
+                <p class="note">开启后，按近 7 天消耗速度预估余额可支撑天数，不足 7 天时发送提醒。与静态警戒线并行工作。</p>
+              </div>
+            </li>
+          </ul>
+        </div>
+        <div class="save-bar">
+          <button type="button" class="ghost" id="reset-btn">重置</button>
+          <button type="button" class="primary" id="save-btn">保存配置</button>
+        </div>
+      </div>
+      </div>
+    </div>
+
+    <div id="no-account" class="card" style="display:none;">
+      <div class="no-account">
+        <p id="no-account-title">未找到关联的预付费企业账户</p>
+        <p id="no-account-desc" style="font-size:12px; margin-top:8px;">请确认您的账号已绑定预付费企业，或联系平台管理员。</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const token = localStorage.getItem("access_token") || "";
+    const api = (path, opts = {}) => fetch("/api/n9e" + path, {
+      ...opts,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + token,
+        "X-User-Token": token,
+        ...(opts.headers || {})
+      }
+    }).then(async r => {
+      const text = await r.text();
+      let j = {};
+      if (text) {
+        try {
+          j = JSON.parse(text);
+        } catch (e) {
+          throw new Error(text || ("请求失败 " + r.status));
+        }
+      }
+      if (!r.ok && r.status === 401) throw new Error("未登录或登录已过期，请重新登录");
+      const err = j.err || (j.error && (j.error.message || j.error));
+      if (err) throw new Error(typeof err === "string" ? err : JSON.stringify(err));
+      if (!r.ok) throw new Error(text || ("请求失败 " + r.status));
+      return j.dat !== undefined ? j.dat : j.data;
+    });
+
+    const $ = (s) => document.querySelector(s);
+    const msg = (t, ok) => { $("#msg").innerHTML = t ? `<p class="${ok ? "ok" : "err"}">${t}</p>` : ""; };
+    const esc = (s) => String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const money = (n) => Number(n || 0).toFixed(2);
+    const fmtTime = (v) => {
+      if (!v) return "—";
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) return String(v).replace("T", " ").replace("Z", "");
+      const p = (n) => String(n).padStart(2, "0");
+      return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+    };
+    const chip = (cls, text) => `<span class="chip ${cls}">${text}</span>`;
+
+    const LEVEL = { NORMAL: "正常", WARN: "预警", CRITICAL: "紧急" };
+    const TRIGGER = { STATIC: "静态线", DYNAMIC: "动态预估", SURGE: "用量激增" };
+    const STATUS = { SENT: "已发送", SKIPPED_COOLDOWN: "限频跳过", FAILED: "发送失败", RECORDED: "已落库" };
+
+    let config = null;
+    let phones = [];
+    let records = [];
+    let page = 1;
+    const pageSize = 10;
+
+    function currentTab() {
+      const h = (location.hash || "").replace(/^#/, "");
+      return h === "settings" ? "settings" : "records";
+    }
+
+    function showTab(name) {
+      const tab = name === "settings" ? "settings" : "records";
+      const prev = document.querySelector(".tabs button.active");
+      const switched = prev && prev.dataset.tab !== tab;
+      document.querySelectorAll(".tabs button").forEach((b) => {
+        b.classList.toggle("active", b.dataset.tab === tab);
+      });
+      document.querySelectorAll(".panel").forEach((p) => {
+        p.classList.toggle("active", p.id === "panel-" + tab);
+      });
+      if (location.hash.replace(/^#/, "") !== tab) {
+        history.replaceState(null, "", "#" + tab);
+      }
+      if (switched) msg("");
+    }
+
+    function renderStatus(data) {
+      const stateCls = (data.current_state || "NORMAL").toLowerCase();
+      const thresholdLabel = data.threshold_mode === "CUSTOM" ? "自定义" : "平台默认";
+      const thresholdValue = data.threshold_mode === "CUSTOM" ? money(data.threshold_fixed_usd) : money(data.threshold_usd);
+      $("#status-grid").innerHTML = `
+        <div class="status-item">
+          <div class="label">当前余额</div>
+          <div class="value">¥${money(data.balance_usd)}</div>
+        </div>
+        <div class="status-item">
+          <div class="label">预警档位</div>
+          <div class="value">${chip(stateCls, LEVEL[data.current_state] || data.current_state)}</div>
+        </div>
+        <div class="status-item">
+          <div class="label">警戒线</div>
+          <div class="value">¥${thresholdValue}</div>
+          <div class="sub">${thresholdLabel}</div>
+        </div>
+        <div class="status-item">
+          <div class="label">动态预警</div>
+          <div class="value">${data.dynamic_enabled ? chip("dynamic", "已开启") : chip("skipped", "已关闭")}</div>
+        </div>
+      `;
+    }
+
+    function renderPhones() {
+      const container = $("#phone-tags");
+      if (!phones.length) {
+        container.innerHTML = '<span style="color:var(--navy-faint); font-size:12px;">暂未设置接收手机号</span>';
+        return;
+      }
+      container.innerHTML = phones.map((p, i) =>
+        `<span class="tag">${esc(p)}<span class="remove" data-idx="${i}">×</span></span>`
+      ).join("");
+    }
+
+    let pendingPhone = "";
+    let otpCooldownTimer = null;
+
+    function setPhoneInputLocked(locked) {
+      const input = $("#phone-input");
+      input.readOnly = locked;
+      $("#add-phone-btn").disabled = locked;
+    }
+
+    function stopOtpCooldown() {
+      if (otpCooldownTimer) {
+        clearInterval(otpCooldownTimer);
+        otpCooldownTimer = null;
+      }
+      const btn = $("#resend-otp-btn");
+      btn.disabled = false;
+      btn.textContent = "重发";
+    }
+
+    function startOtpCooldown(seconds) {
+      const btn = $("#resend-otp-btn");
+      stopOtpCooldown();
+      let left = seconds;
+      btn.disabled = true;
+      btn.textContent = left + "s 后重发";
+      otpCooldownTimer = setInterval(() => {
+        left -= 1;
+        if (left <= 0) {
+          stopOtpCooldown();
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = left + "s 后重发";
+      }, 1000);
+    }
+
+    function resetOtpFlow(keepPhone) {
+      pendingPhone = "";
+      $("#otp-wrap").style.display = "none";
+      $("#otp-code").value = "";
+      if (!keepPhone) $("#phone-input").value = "";
+      setPhoneInputLocked(false);
+      stopOtpCooldown();
+    }
+
+    function platformLineLabel(data) {
+      const n = money(data && data.platform_threshold_usd);
+      return "关闭时按平台默认规则（当前 ¥" + n + "）；开启后金额必须高于该默认线，仅预警档生效，紧急档仍按平台线。";
+    }
+
+    function fillForm(data) {
+      config = data;
+      phones = Array.isArray(data.receivers) ? [...data.receivers] : [];
+      resetOtpFlow(false);
+
+      const warnOn = data.enabled !== false;
+      $("#warn-toggle").checked = warnOn;
+      $("#warn-label").textContent = warnOn ? "已开启" : "已关闭";
+
+      const isCustom = data.threshold_mode === "CUSTOM";
+      $("#custom-threshold-toggle").checked = isCustom;
+      $("#threshold-label").textContent = isCustom ? "自定义金额" : "使用平台默认规则";
+      $("#threshold-input-wrap").style.display = isCustom ? "block" : "none";
+      $("#threshold-amount").value = isCustom ? data.threshold_fixed_usd : "";
+      $("#threshold-note").textContent = platformLineLabel(data);
+
+      $("#dynamic-toggle").checked = data.dynamic_enabled;
+      $("#dynamic-label").textContent = data.dynamic_enabled ? "已开启" : "已关闭";
+
+      $("#current-phone").textContent = data.current_phone || "—";
+      $("#enterprise-name").textContent = data.enterprise_name || "";
+
+      renderPhones();
+      renderStatus(data);
+    }
+
+    function renderRecords() {
+      const start = (page - 1) * pageSize;
+      const slice = records.slice(start, start + pageSize);
+      if (!slice.length) {
+        $("#record-rows").innerHTML = `<tr><td colspan="7"><div class="empty">暂无告警记录</div></td></tr>`;
+        $("#pager").innerHTML = "";
+        return;
+      }
+      $("#record-rows").innerHTML = slice.map(r => {
+        const levelCls = (r.level || "NORMAL").toLowerCase();
+        const triggerCls = r.trigger_type === "DYNAMIC" ? "dynamic" : r.trigger_type === "SURGE" ? "warn" : "static";
+        const statusCls = r.status === "SENT" ? "sent" : r.status === "FAILED" ? "failed" : "skipped";
+        const channel = [r.channel, r.receiver].filter(Boolean).join(" ") || "—";
+        return `<tr>
+          <td class="mono">${fmtTime(r.created_at)}</td>
+          <td>${chip(levelCls, LEVEL[r.level] || r.level)}</td>
+          <td>${chip(triggerCls, TRIGGER[r.trigger_type] || r.trigger_type)}</td>
+          <td class="mono">¥${money(r.balance_usd)}</td>
+          <td class="mono">¥${money(r.threshold_usd)}</td>
+          <td>${chip(statusCls, STATUS[r.status] || r.status)}</td>
+          <td>${esc(channel)}</td>
+        </tr>`;
+      }).join("");
+
+      const totalPages = Math.max(1, Math.ceil(records.length / pageSize));
+      $("#pager").innerHTML =
+        `<span>共 ${records.length} 条</span>` +
+        `<button type="button" id="prev-page" ${page <= 1 ? "disabled" : ""}>上一页</button>` +
+        `<span>第 ${page} / ${totalPages} 页</span>` +
+        `<button type="button" id="next-page" ${page >= totalPages ? "disabled" : ""}>下一页</button>`;
+      $("#prev-page").onclick = () => { if (page > 1) { page--; renderRecords(); } };
+      $("#next-page").onclick = () => { if (page < totalPages) { page++; renderRecords(); } };
+    }
+
+    async function loadConfig() {
+      const data = await api("/balance-alert/my-config");
+      if (!data || !data.billing_account_id) {
+        $("#content").style.display = "none";
+        $("#no-account").style.display = "block";
+        $("#tabs").hidden = true;
+        if (data && data.reason === "need_bind") {
+          $("#no-account-title").textContent = "请先在个人中心绑定邮箱或手机号";
+          $("#no-account-desc").textContent = "绑定后系统才能匹配到您的预付费企业账户。";
+        } else {
+          $("#no-account-title").textContent = "未找到关联的预付费企业账户";
+          $("#no-account-desc").textContent = "请确认您的账号已绑定预付费企业，或联系平台管理员。";
+        }
+        return;
+      }
+      $("#content").style.display = "flex";
+      $("#no-account").style.display = "none";
+      $("#tabs").hidden = false;
+      fillForm(data);
+      showTab(currentTab());
+      return data;
+    }
+
+    async function loadRecords() {
+      try {
+        records = await api("/balance-alert/my-records?limit=100") || [];
+        page = 1;
+        renderRecords();
+      } catch (e) {
+        records = [];
+        renderRecords();
+      }
+    }
+
+    async function saveConfig() {
+      const btn = $("#save-btn");
+      btn.disabled = true;
+      try {
+        const isCustom = $("#custom-threshold-toggle").checked;
+        const body = {
+          enabled: $("#warn-toggle").checked,
+          threshold_mode: isCustom ? "CUSTOM" : "AUTO",
+          threshold_fixed_usd: isCustom ? Number($("#threshold-amount").value) : 0,
+          receivers: phones,
+          dynamic_enabled: $("#dynamic-toggle").checked
+        };
+        if (isCustom && body.threshold_fixed_usd <= 0) {
+          throw new Error("自定义警戒线金额必须大于 0");
+        }
+        const platform = Number(config && config.platform_threshold_usd) || 0;
+        if (isCustom && platform > 0 && body.threshold_fixed_usd <= platform) {
+          throw new Error("自定义警戒线必须高于平台默认线（当前 ¥" + money(platform) + "）");
+        }
+        await api("/balance-alert/my-config", {
+          method: "PUT",
+          body: JSON.stringify(body)
+        });
+        msg("配置已保存", true);
+        await loadConfig();
+        showTab("settings");
+      } catch (e) {
+        msg(e.message, false);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // Event listeners
+    $("#warn-toggle").addEventListener("change", function() {
+      $("#warn-label").textContent = this.checked ? "已开启" : "已关闭";
+    });
+
+    $("#custom-threshold-toggle").addEventListener("change", function() {
+      const isCustom = this.checked;
+      $("#threshold-label").textContent = isCustom ? "自定义金额" : "使用平台默认规则";
+      $("#threshold-input-wrap").style.display = isCustom ? "block" : "none";
+    });
+
+    $("#dynamic-toggle").addEventListener("change", function() {
+      $("#dynamic-label").textContent = this.checked ? "已开启" : "已关闭";
+    });
+
+    async function requestOtp(phone) {
+      pendingPhone = phone;
+      $("#phone-input").value = phone;
+      setPhoneInputLocked(true);
+      $("#otp-wrap").style.display = "flex";
+      $("#otp-code").value = "";
+      $("#otp-code").focus();
+      const resend = $("#resend-otp-btn");
+      resend.disabled = true;
+      try {
+        await api("/balance-alert/my-config/otp", {
+          method: "POST",
+          body: JSON.stringify({ phone })
+        });
+        msg("验证码已发送至 " + phone, true);
+        startOtpCooldown(60);
+      } catch (e) {
+        resend.disabled = false;
+        resend.textContent = "重发";
+        setPhoneInputLocked(false);
+        throw e;
+      }
+    }
+
+    $("#add-phone-btn").addEventListener("click", async () => {
+      const input = $("#phone-input");
+      const phone = input.value.trim();
+      if (!phone) return;
+      if (!/^1[3-9]\d{9}$/.test(phone)) {
+        msg("手机号格式不正确", false);
+        return;
+      }
+      if (phones.includes(phone)) {
+        msg("该手机号已添加", false);
+        return;
+      }
+      if (phones.length >= 5) {
+        msg("最多添加 5 个手机号", false);
+        return;
+      }
+      const owner = (config && config.current_phone) || "";
+      if (phone === owner) {
+        phones.push(phone);
+        input.value = "";
+        renderPhones();
+        msg("");
+        return;
+      }
+      try {
+        await requestOtp(phone);
+      } catch (e) {
+        msg(e.message, false);
+      }
+    });
+
+    $("#verify-otp-btn").addEventListener("click", async () => {
+      if (!pendingPhone) return;
+      const code = ($("#otp-code").value || "").trim();
+      if (!code) {
+        msg("请输入验证码", false);
+        return;
+      }
+      try {
+        await api("/balance-alert/my-config/otp/verify", {
+          method: "POST",
+          body: JSON.stringify({ phone: pendingPhone, code })
+        });
+        if (!phones.includes(pendingPhone) && phones.length < 5) {
+          phones.push(pendingPhone);
+        }
+        resetOtpFlow(false);
+        renderPhones();
+        msg("手机号已验证", true);
+      } catch (e) {
+        msg(e.message, false);
+      }
+    });
+
+    $("#resend-otp-btn").addEventListener("click", async () => {
+      if (!pendingPhone) return;
+      try {
+        await requestOtp(pendingPhone);
+      } catch (e) {
+        msg(e.message, false);
+      }
+    });
+
+    $("#phone-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); $("#add-phone-btn").click(); }
+    });
+
+    document.addEventListener("click", (e) => {
+      if (e.target.classList.contains("remove")) {
+        const idx = Number(e.target.dataset.idx);
+        if (!isNaN(idx)) {
+          phones.splice(idx, 1);
+          renderPhones();
+        }
+      }
+    });
+
+    $("#save-btn").addEventListener("click", saveConfig);
+    $("#reset-btn").addEventListener("click", () => {
+      if (config) fillForm(config);
+      msg("已重置为上次保存的配置", true);
+    });
+    document.querySelectorAll(".tabs button").forEach((b) => {
+      b.addEventListener("click", () => showTab(b.dataset.tab));
+    });
+    window.addEventListener("hashchange", () => showTab(currentTab()));
+
+    // Init
+    if (!token) {
+      msg("未登录，请先登录系统", false);
+    } else {
+      loadConfig().then(() => loadRecords()).catch(e => msg(e.message, false));
+    }
+  </script>
+</body>
+</html>

@@ -63,7 +63,7 @@ func noRouteCases() []noRouteCase {
 		{"unregistered metric-views api", "/api/n9e/metric-views", http.StatusNotFound, "not found"},
 		{"removed landing spa", "/landing", http.StatusNotFound, "not found"},
 		{"removed home spa", "/home", http.StatusNotFound, "not found"},
-		{"home redirects to alert-rules", "/", http.StatusFound, ""},
+		{"spa root", "/", http.StatusOK, "n9e spa"},
 	}
 }
 
@@ -78,9 +78,6 @@ func runNoRouteCases(t *testing.T, r *gin.Engine) {
 
 			if w.Code != tc.wantStatus {
 				t.Fatalf("path %s: status = %d, want %d, body=%q", tc.path, w.Code, tc.wantStatus, w.Body.String())
-			}
-			if tc.name == "home redirects to alert-rules" && w.Header().Get("Location") != "/alert-rules" {
-				t.Fatalf("redirect location = %q", w.Header().Get("Location"))
 			}
 			if tc.wantBody != "" && !strings.Contains(w.Body.String(), tc.wantBody) {
 				t.Fatalf("path %s: body = %q, want contains %q", tc.path, w.Body.String(), tc.wantBody)

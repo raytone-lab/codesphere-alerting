@@ -212,20 +212,93 @@
           setTimeout(mount, 300);
           return false;
         }
+        var deadHomes = {
+          "/landing": 1,
+          "/home": 1,
+          "/overview": 1,
+          "/403": 1,
+          "/metric/explorer": 1
+        };
+        var homePath = "/system/balance-alert";
+        var permsReady = false;
+        function token() {
+          return localStorage.getItem("access_token") || localStorage.getItem("accessToken") || "";
+        }
+        function normPath(href) {
+          if (href == null || href === "") return location.pathname || "/";
+          var s = String(href);
+          var path = s;
+          if (s.indexOf("http://") === 0 || s.indexOf("https://") === 0) {
+            try { path = new URL(s).pathname; } catch (e) { return location.pathname || "/"; }
+          } else {
+            path = s.split("?")[0].split("#")[0];
+          }
+          return (path || "/").replace(/\/+$/, "") || "/";
+        }
+        function shouldRewrite(path) {
+          if (path === "/login" || path.indexOf("/callback") === 0) return false;
+          if (deadHomes[path]) return true;
+          return path === "/" && !!token();
+        }
+        function rewriteUrl(u) {
+          if (u == null) return u;
+          if (!shouldRewrite(normPath(u))) return u;
+          if (token() && !permsReady) return u;
+          return homePath;
+        }
+        function applyHomeFromPerms(lst) {
+          homePath = lst && lst.indexOf("/system/balance-alert") !== -1
+            ? "/system/balance-alert"
+            : "/system/enterprise-balance";
+          permsReady = true;
+        }
+        function loadPerms() {
+          var t = token();
+          if (!t) return Promise.resolve();
+          return fetch("/api/n9e/self/perms", {
+            headers: { Authorization: "Bearer " + t, "X-User-Token": t }
+          }).then(function (r) { return r.json(); }).then(function (j) {
+            applyHomeFromPerms((j && j.dat) || []);
+          }).catch(function () {
+            permsReady = true;
+          });
+        }
+        function goHome() {
+          if (normPath(location.pathname) === homePath) return;
+          history.replaceState(null, "", homePath);
+          setTimeout(mount, 0);
+          setTimeout(mount, 300);
+        }
+        function bounceHome() {
+          if (token() && !permsReady) return;
+          if (shouldRewrite(normPath(location.pathname))) goHome();
+        }
+        function afterPerms() {
+          bounceHome();
+          var p = normPath(location.pathname);
+          if (p === "/system/enterprise-balance" && homePath === "/system/balance-alert") goHome();
+        }
         if (hijack(location.pathname + location.search)) return;
         var ps = history.pushState;
         history.pushState = function (s, t, u) {
+          if (arguments.length > 2) arguments[2] = rewriteUrl(u);
           var ret = ps.apply(this, arguments);
           setTimeout(mount, 0);
           return ret;
         };
         var rs = history.replaceState;
         history.replaceState = function (s, t, u) {
+          if (arguments.length > 2) arguments[2] = rewriteUrl(u);
           var ret = rs.apply(this, arguments);
           setTimeout(mount, 0);
           return ret;
         };
-        window.addEventListener("popstate", function () { mount(); });
+        window.addEventListener("popstate", function () { bounceHome(); mount(); });
+        if (token()) {
+          loadPerms().then(afterPerms);
+        } else {
+          bounceHome();
+        }
         document.addEventListener("click", function (e) {
           var a = e.target && e.target.closest ? e.target.closest("a") : null;
           if (!a) return;

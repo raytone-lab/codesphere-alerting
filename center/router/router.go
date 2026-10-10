@@ -178,10 +178,6 @@ func (rt *Router) configNoRoute(r *gin.Engine, fs *http.FileSystem) {
 			}
 		default:
 			p := c.Request.URL.Path
-			if p == "/" {
-				c.Redirect(http.StatusFound, "/alert-rules")
-				return
-			}
 			if strings.HasPrefix(p, "/api/") {
 				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"err": "not found", "request_id": c.GetString("trace_id")})
 				return

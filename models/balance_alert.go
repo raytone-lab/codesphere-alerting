@@ -27,6 +27,12 @@ const (
 	DefaultCriticalRepeatDays = 3
 	DefaultLastRechargePct    = 5
 	MaxBalanceAlertReceivers  = 5
+
+	// 授信活跃判定的垫付追溯窗口（天）。授信企业月度对账节奏下垫付间隔最长约
+	// 31 天，连续 90 天无新垫付即判定运营模式已转为预付费。
+	DefaultCreditAdvanceWindowDays = 90
+	MinCreditAdvanceWindowDays     = 1
+	MaxCreditAdvanceWindowDays     = 365
 )
 
 type BalanceAlertConfig struct {
@@ -93,18 +99,19 @@ func (BalanceAlertRecord) TableName() string {
 }
 
 type BalanceAlertSettings struct {
-	Enabled              *bool    `json:"enabled"`
-	SendMode             string   `json:"send_mode"`
-	PilotReceivers       []string `json:"pilot_receivers,omitempty"` // legacy; prefer PilotNotifyRuleID
-	VoucherThresholdUSD  float64  `json:"voucher_threshold_usd"`
-	LastRechargePct      float64  `json:"last_recharge_pct"`
-	CriticalRepeatDays   int      `json:"critical_repeat_days"`
-	DatasourceID         int64    `json:"datasource_id"`
-	SmsWebhook           string   `json:"sms_webhook,omitempty"` // legacy; prefer CustomerNotifyRuleID
-	CustomerPhoneSQLHint string   `json:"customer_phone_sql_hint,omitempty"`
-	PilotNotifyRuleID    int64    `json:"pilot_notify_rule_id"`
-	CustomerNotifyRuleID int64    `json:"customer_notify_rule_id"`
-	DynamicNotifyRuleID  int64    `json:"dynamic_notify_rule_id"`
+	Enabled                 *bool    `json:"enabled"`
+	SendMode                string   `json:"send_mode"`
+	PilotReceivers          []string `json:"pilot_receivers,omitempty"` // legacy; prefer PilotNotifyRuleID
+	VoucherThresholdUSD     float64  `json:"voucher_threshold_usd"`
+	LastRechargePct         float64  `json:"last_recharge_pct"`
+	CriticalRepeatDays      int      `json:"critical_repeat_days"`
+	CreditAdvanceWindowDays int      `json:"credit_advance_window_days"`
+	DatasourceID            int64    `json:"datasource_id"`
+	SmsWebhook              string   `json:"sms_webhook,omitempty"` // legacy; prefer CustomerNotifyRuleID
+	CustomerPhoneSQLHint    string   `json:"customer_phone_sql_hint,omitempty"`
+	PilotNotifyRuleID       int64    `json:"pilot_notify_rule_id"`
+	CustomerNotifyRuleID    int64    `json:"customer_notify_rule_id"`
+	DynamicNotifyRuleID     int64    `json:"dynamic_notify_rule_id"`
 }
 
 func lastRechargePctPresent(raw string) bool {
@@ -133,12 +140,13 @@ func boolPtr(v bool) *bool {
 
 func DefaultBalanceAlertSettings() BalanceAlertSettings {
 	return BalanceAlertSettings{
-		Enabled:             boolPtr(true),
-		SendMode:            "OFF",
-		PilotReceivers:      []string{},
-		VoucherThresholdUSD: 20,
-		LastRechargePct:     DefaultLastRechargePct,
-		CriticalRepeatDays:  DefaultCriticalRepeatDays,
+		Enabled:                 boolPtr(true),
+		SendMode:                "OFF",
+		PilotReceivers:          []string{},
+		VoucherThresholdUSD:     20,
+		LastRechargePct:         DefaultLastRechargePct,
+		CriticalRepeatDays:      DefaultCriticalRepeatDays,
+		CreditAdvanceWindowDays: DefaultCreditAdvanceWindowDays,
 	}
 }
 
@@ -180,6 +188,11 @@ func BalanceAlertSettingsGet(ctx *ctx.Context) (BalanceAlertSettings, error) {
 	if s.CriticalRepeatDays <= 0 {
 		s.CriticalRepeatDays = DefaultCriticalRepeatDays
 	}
+	if s.CreditAdvanceWindowDays <= 0 {
+		s.CreditAdvanceWindowDays = DefaultCreditAdvanceWindowDays
+	} else if s.CreditAdvanceWindowDays > MaxCreditAdvanceWindowDays {
+		s.CreditAdvanceWindowDays = MaxCreditAdvanceWindowDays
+	}
 	if s.PilotReceivers == nil {
 		s.PilotReceivers = []string{}
 	}
@@ -216,6 +229,11 @@ func BalanceAlertSettingsPut(ctx *ctx.Context, s BalanceAlertSettings, username 
 	}
 	if s.CriticalRepeatDays <= 0 {
 		s.CriticalRepeatDays = DefaultCriticalRepeatDays
+	}
+	// 窗口参数直接决定客群判定，非法值必须拒绝保存而不是静默纠正
+	// （静默纠正会让运营以为已改、实际口径未变）。
+	if s.CreditAdvanceWindowDays < MinCreditAdvanceWindowDays || s.CreditAdvanceWindowDays > MaxCreditAdvanceWindowDays {
+		return errors.Errorf("识别窗口必须为 %d–%d 的整数天", MinCreditAdvanceWindowDays, MaxCreditAdvanceWindowDays)
 	}
 	if s.PilotReceivers == nil {
 		s.PilotReceivers = []string{}

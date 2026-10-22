@@ -242,7 +242,7 @@ func MigrateTables(db *gorm.DB) error {
 		&models.UserToken{}, &models.DashAnnotation{}, MessageTemplate{}, NotifyRule{}, NotifyChannelConfig{}, &EsIndexPatternMigrate{},
 		&models.EventPipeline{}, &models.EmbeddedProduct{}, &models.SourceToken{},
 		&models.SavedView{}, &models.UserViewFavorite{},
-		&models.BalanceAlertConfig{}, &models.BalanceAlertRecord{}}
+		&models.BalanceAlertConfig{}, &models.BalanceAlertRecord{}, &models.BalanceAlertCreditExclude{}}
 
 	if isPostgres(db) {
 		dts = append(dts, &models.PostgresBuiltinComponent{})

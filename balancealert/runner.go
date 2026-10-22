@@ -14,14 +14,16 @@ import (
 )
 
 type Stats struct {
-	Disabled      bool     `json:"disabled,omitempty"`
-	Prepaid       int      `json:"prepaid"`
-	SkippedIncome int      `json:"skipped_income"`
-	Evaluated     int      `json:"evaluated"`
-	Sent          int      `json:"sent"`
-	Cooldown      int      `json:"cooldown"`
-	Failed        int      `json:"failed"`
-	Errors        []string `json:"errors,omitempty"`
+	Disabled       bool     `json:"disabled,omitempty"`
+	ExcludeBlocked bool     `json:"exclude_blocked,omitempty"`
+	Excluded       int      `json:"excluded"`
+	Prepaid        int      `json:"prepaid"`
+	SkippedIncome  int      `json:"skipped_income"`
+	Evaluated      int      `json:"evaluated"`
+	Sent           int      `json:"sent"`
+	Cooldown       int      `json:"cooldown"`
+	Failed         int      `json:"failed"`
+	Errors         []string `json:"errors,omitempty"`
 }
 
 type Runner struct {
@@ -81,6 +83,11 @@ func (r *Runner) run(std context.Context) (Stats, error) {
 	if err != nil {
 		return stats, fmt.Errorf("list prepaid enterprises: %w", err)
 	}
+	accounts, stats.Excluded, err = applyCreditExcludes(r.Ctx, accounts)
+	if err != nil {
+		stats.ExcludeBlocked = true
+		return stats, err
+	}
 	stats.Prepaid = len(accounts)
 
 	consumptionList, err := store.ListConsumption(std)
@@ -139,6 +146,11 @@ func (r *Runner) runDynamic(std context.Context) (Stats, error) {
 	accounts, err := store.ListPrepaid(std)
 	if err != nil {
 		return stats, fmt.Errorf("list prepaid enterprises: %w", err)
+	}
+	accounts, stats.Excluded, err = applyCreditExcludes(r.Ctx, accounts)
+	if err != nil {
+		stats.ExcludeBlocked = true
+		return stats, err
 	}
 	stats.Prepaid = len(accounts)
 

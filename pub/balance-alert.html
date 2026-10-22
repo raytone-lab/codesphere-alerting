@@ -98,6 +98,12 @@
     .row .k { padding-top: 8px; color: var(--navy-muted); font-size: 13px; font-weight: 600; }
     .row .v { min-width: 0; }
     .row .note { margin: 6px 0 0; color: var(--navy-faint); font-size: 12px; line-height: 1.5; }
+    .exclude-state { margin: 0 0 8px; font-size: 13px; line-height: 1.6; color: var(--navy-muted); }
+    .exclude-state b { color: var(--navy-900); }
+    .exclude-state .bad { color: #b42318; }
+    .exclude-msg { margin: 8px 0 0; font-size: 12px; line-height: 1.5; }
+    .exclude-msg.ok { color: #1f7a4d; }
+    .exclude-msg.err { color: #b42318; }
     .table-wrap { flex: 1 1 auto; min-height: 0; overflow: auto; }
     table.records {
       width: max-content;
@@ -288,7 +294,7 @@
     <div class="hero">
       <div>
         <h1>预付费余额预警</h1>
-        <p>每 15 分钟判定一轮。参数在「参数设置」中修改，保存后立即生效。</p>
+        <p>每 15 分钟判定一轮。参数在「参数设置」中修改，保存后立即生效；授信排除名单每日 07:30 自动刷新。</p>
       </div>
       <div class="hero-actions">
         <button type="button" class="ghost" id="reload">刷新记录</button>
@@ -412,6 +418,25 @@
               </div>
             </li>
             <li class="row">
+              <div class="k">授信识别窗口</div>
+              <div class="v">
+                <div class="suffix">
+                  <input name="credit_advance_window_days" type="number" step="1" min="1" max="365" required />
+                  <em>天</em>
+                </div>
+                <p class="note">窗口内产生过信用垫付、或仍有未清垫付债务的企业判定为授信活跃，不进预警池。默认 90，范围 1–365；改后需刷新名单才生效。</p>
+              </div>
+            </li>
+            <li class="row">
+              <div class="k">授信排除名单</div>
+              <div class="v">
+                <p class="exclude-state" id="exclude-state">名单状态加载中…</p>
+                <button type="button" class="ghost" id="refresh-exclude">立即刷新名单</button>
+                <p class="note">每日 07:30（北京时间）自动全量刷新，判定轮次只读名单、不回扫消费明细。刷新失败沿用上一份名单；从未成功刷新时当轮停止圈选并告警。</p>
+                <p class="exclude-msg" id="exclude-msg"></p>
+              </div>
+            </li>
+            <li class="row">
               <div class="k">试点通知规则</div>
               <div class="v">
                 <select name="pilot_notify_rule_id">
@@ -528,6 +553,48 @@
       const n = Number(currentSettings && currentSettings.last_recharge_pct);
       return n > 0 ? n : 5;
     }
+    const EXCLUDE_REASON = {
+      OPEN_DEBT: "未清垫付",
+      RECENT_ADVANCE: "窗口内新垫付",
+      RECENT_SETTLEMENT: "窗口内信用核销"
+    };
+    function renderExcludeState(st) {
+      const el = $("#exclude-state");
+      if (!st) {
+        el.textContent = "名单状态加载失败";
+        return;
+      }
+      if (!st.ready) {
+        el.innerHTML = '<span class="bad">从未成功刷新：当前已停止圈选（fail closed），不会发出任何余额预警。请立即刷新名单。</span>';
+        return;
+      }
+      const reasons = st.reasons || {};
+      let html = "上次成功 <b>" + esc(fmtTime(st.last_success_at)) + "</b> · 名单 <b>" + (st.total || 0) + "</b> 家" +
+        "（未清垫付 " + (reasons.OPEN_DEBT || 0) +
+        " · 窗口内新垫付 " + (reasons.RECENT_ADVANCE || 0) +
+        " · 窗口内核销 " + (reasons.RECENT_SETTLEMENT || 0) + "）" +
+        " · 窗口 <b>" + (st.window_days || 90) + "</b> 天";
+      if (st.consecutive_failures) {
+        html += ' · <span class="bad">连续失败 ' + st.consecutive_failures + " 次（仍在用旧名单）</span>";
+      }
+      if (st.last_error) {
+        html += '<br><span class="bad">' + esc(st.last_error) + "</span>";
+      }
+      el.innerHTML = html;
+    }
+    function excludeMsg(text, ok) {
+      const el = $("#exclude-msg");
+      el.className = "exclude-msg " + (ok ? "ok" : "err");
+      el.textContent = text || "";
+    }
+    async function loadExcludeState() {
+      try {
+        const st = await api("/balance-alert/exclude-state");
+        renderExcludeState(st);
+      } catch (e) {
+        renderExcludeState(null);
+      }
+    }
     function ruleLabel(mode) {
       if (mode === "RECHARGE_PCT" || mode === "RECHARGE_5PCT" || mode === "LAST_RECHARGE_5PCT") {
         return "充值 × " + rechargePct() + "%";
@@ -629,6 +696,7 @@
         " · 提醒线 <b>" + money(s.voucher_threshold_usd || 20) + "</b> 元" +
         " · 充值比例 <b>" + String(s.last_recharge_pct || 5) + "%</b>" +
         " · 紧急重复 <b>" + String(s.critical_repeat_days || 3) + "</b> 天" +
+        " · 授信窗口 <b>" + String(s.credit_advance_window_days || 90) + "</b> 天" +
         " · 数据源 <b>" + esc(datasourceLabel(s.datasource_id)) + "</b>" +
         " · 试点规则 <b>" + esc(notifyRuleLabel(s.pilot_notify_rule_id)) + "</b>" +
         " · 客户规则 <b>" + esc(notifyRuleLabel(s.customer_notify_rule_id)) + "</b>";
@@ -641,6 +709,7 @@
       form.voucher_threshold_usd.value = s.voucher_threshold_usd || 20;
       form.last_recharge_pct.value = s.last_recharge_pct || 5;
       form.critical_repeat_days.value = s.critical_repeat_days || 3;
+      form.credit_advance_window_days.value = s.credit_advance_window_days || 90;
       fillDatasourceSelect(s.datasource_id || 0);
       fillNotifyRuleSelect(form.pilot_notify_rule_id, s.pilot_notify_rule_id || 0);
       fillNotifyRuleSelect(form.customer_notify_rule_id, s.customer_notify_rule_id || 0);
@@ -659,6 +728,7 @@
       currentSettings = await api("/balance-alert/settings");
       fillForm(currentSettings);
       renderSummary(currentSettings);
+      loadExcludeState();
       return currentSettings;
     }
     function openSettings() {
@@ -811,6 +881,10 @@
         if (lastRechargePct > 100) {
           throw new Error("充值提醒比例必须大于 0 且不超过 100");
         }
+        const windowDays = Number(form.credit_advance_window_days.value);
+        if (!Number.isInteger(windowDays) || windowDays < 1 || windowDays > 365) {
+          throw new Error("授信识别窗口必须为 1–365 的整数天");
+        }
         await api("/balance-alert/settings", {
           method: "PUT",
           body: JSON.stringify({
@@ -820,6 +894,7 @@
             voucher_threshold_usd: Number(form.voucher_threshold_usd.value),
             last_recharge_pct: lastRechargePct,
             critical_repeat_days: Number(form.critical_repeat_days.value),
+            credit_advance_window_days: windowDays,
             pilot_notify_rule_id: Number(form.pilot_notify_rule_id.value || 0),
             customer_notify_rule_id: Number(form.customer_notify_rule_id.value || 0),
             datasource_id: Number(form.datasource_id.value || 0)
@@ -834,6 +909,24 @@
         btn.disabled = false;
       }
     });
+    $("#refresh-exclude").onclick = async () => {
+      const btn = $("#refresh-exclude");
+      btn.disabled = true;
+      excludeMsg("正在刷新…", true);
+      try {
+        const res = await api("/balance-alert/exclude-refresh", { method: "POST" }) || {};
+        const reasons = res.reasons || {};
+        await loadExcludeState();
+        excludeMsg("已刷新：" + (res.total || 0) + " 家（未清垫付 " + (reasons.OPEN_DEBT || 0) +
+          " · 窗口内新垫付 " + (reasons.RECENT_ADVANCE || 0) +
+          " · 窗口内核销 " + (reasons.RECENT_SETTLEMENT || 0) + "），耗时 " + (res.duration_ms || 0) + "ms", true);
+      } catch (err) {
+        await loadExcludeState();
+        excludeMsg("刷新失败：" + err.message, false);
+      } finally {
+        btn.disabled = false;
+      }
+    };
     $("#open-settings").onclick = openSettings;
     $("#close-settings").onclick = closeSettings;
     $("#cancel-settings").onclick = closeSettings;

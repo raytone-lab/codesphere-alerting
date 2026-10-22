@@ -57,6 +57,12 @@ func ReconMissReports(n9e *ctx.Context, lookbackDays int) (MissReportResult, err
 	if err != nil {
 		return out, fmt.Errorf("list prepaid: %w", err)
 	}
+	// 与判定轮次同一口径：漏报对账也必须剔除授信活跃企业，否则会把
+	// 正常排除的授信企业报成「漏报」。
+	accts, _, err = applyCreditExcludes(n9e, accts)
+	if err != nil {
+		return out, err
+	}
 	out.PrepaidScanned = len(accts)
 
 	since := out.AsOf.AddDate(0, 0, -lookbackDays)

@@ -15,9 +15,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// PrepaidSelectSQL is FR-01: enterprise, active, not deleted, no current available credit.
-// Available-credit predicate mirrors codesphere-billing enterprise-account.service
-// activeCreditLimitUsd: ACTIVE + limit>0 + terms_days>0 + effective/expires window.
+// PrepaidSelectSQL is FR-01 (v1.1) 的**候选集**：enterprise、active、未删除、
+// 未被半开通隔离。授信活跃的剔除不在这里做——排除名单已物化在 alerting 自己的库，
+// 跨库无法反连接，改由 applyCreditExcludes 用内存集合过滤（见 exclude.go）。
+//
+// 明确不回退 billing_account_credit_configs 的旧口径：配置状态恒为 ACTIVE，
+// 会永久漏报事实已转预付费的企业；也不在此实时扫 balance_consumption_allocations（G4）。
 const PrepaidSelectSQL = `
 SELECT
   p.id,
@@ -34,16 +37,6 @@ FROM (
     AND a.status = 'active'
     AND a.deleted_at IS NULL
     AND a.provisioning_quarantined_at IS NULL
-    AND NOT EXISTS (
-      SELECT 1 FROM billing_account_credit_configs c
-      WHERE c.billing_account_id = a.id
-        AND c.status = 'ACTIVE'
-        AND c.limit_usd > 0
-        AND c.terms_days IS NOT NULL
-        AND c.terms_days > 0
-        AND (c.effective_at IS NULL OR c.effective_at <= now())
-        AND (c.expires_at IS NULL OR c.expires_at > now())
-    )
 ) p
 LEFT JOIN account_wallets w ON w.billing_account_id = p.id
 LEFT JOIN (
@@ -156,6 +149,8 @@ type Store interface {
 	ListConsumption(ctx context.Context) ([]Consumption, error)
 	ResolveAccountByEmailOrPhone(ctx context.Context, email, phone string) (*MyAccount, error)
 	ListBillingUsers(ctx context.Context) ([]BillingUser, error)
+	// ScanCreditExcludes 返回「账户 -> 排除主因」，只读计费库，供每日物化名单使用。
+	ScanCreditExcludes(ctx context.Context, windowDays int) (map[string]string, error)
 }
 
 type PGStore struct {
@@ -258,6 +253,29 @@ func (s *PGStore) ListBillingUsers(ctx context.Context) ([]BillingUser, error) {
 			return nil, err
 		}
 		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// ScanCreditExcludes 只读计费库：每日一次聚合，算出授信活跃账户与其主因。
+// 本方法不写入计费库任何表，alerting 侧对该库不需要 INSERT/UPDATE/DELETE 权限。
+func (s *PGStore) ScanCreditExcludes(ctx context.Context, windowDays int) (map[string]string, error) {
+	rows, err := s.db.WithContext(ctx).Raw(excludeScanSQL, windowDays, windowDays).Rows()
+	if err != nil {
+		return nil, wrapBillingSelectErr(err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]string)
+	for rows.Next() {
+		var id, reason string
+		if err := rows.Scan(&id, &reason); err != nil {
+			return nil, err
+		}
+		if id == "" {
+			continue
+		}
+		out[id] = reason
 	}
 	return out, rows.Err()
 }

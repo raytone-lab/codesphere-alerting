@@ -1,6 +1,7 @@
 package balancealert
 
 import (
+	"github.com/ccfos/nightingale/v6/models"
 	"github.com/ccfos/nightingale/v6/pkg/ctx"
 
 	"github.com/robfig/cron/v3"
@@ -66,6 +67,32 @@ func StartCron(n9e *ctx.Context) {
 		return
 	}
 
+	// 首次升级到名单版本时物化表还是空的，15 分钟轮次会 fail closed 到次日
+	// 07:30。启动即补一次，避免上线后整整一天不发预警。已有成功记录则不做事。
+	go func() {
+		state, err := models.BalanceAlertExcludeStateGet(n9e)
+		if err != nil || state.Ready() {
+			return
+		}
+		if _, err := RefreshCreditExcludes(n9e, "STARTUP"); err != nil {
+			logger.Errorf("balancealert exclude refresh startup: %v", err)
+		}
+	}()
+
+	// 排除名单每日 07:30（Asia/Shanghai）全量刷新。独立调度器显式绑定时区：
+	// 不能用默认调度器的进程本地时区，否则容器跑 UTC 时会在北京时间 15:30 才刷。
+	refreshCron := cron.New(cron.WithLocation(locShanghai))
+	_, err = refreshCron.AddFunc("30 7 * * *", func() {
+		if _, err := RefreshCreditExcludes(n9e, "CRON"); err != nil {
+			logger.Errorf("balancealert exclude refresh cron: %v", err)
+		}
+	})
+	if err != nil {
+		logger.Errorf("balancealert exclude refresh cron schedule: %v", err)
+		return
+	}
+	refreshCron.Start()
+
 	c.Start()
-	logger.Info("balancealert cron started (static: every 15 minutes, dynamic: daily at 10:00, miss-report: daily at 08:05)")
+	logger.Info("balancealert cron started (static: every 15 minutes, dynamic: daily at 10:00, miss-report: daily at 08:05, credit-exclude refresh: daily at 07:30 Asia/Shanghai)")
 }

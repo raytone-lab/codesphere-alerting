@@ -36,16 +36,27 @@ func (f fakeStore) ListBillingUsers(ctx context.Context) ([]BillingUser, error) 
 	return f.billingUsers, f.err
 }
 
+func (f fakeStore) ScanCreditExcludes(ctx context.Context, windowDays int) (map[string]string, error) {
+	return nil, f.err
+}
+
 func testRunnerCtx(t *testing.T) *ctx.Context {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&models.Configs{}, &models.BalanceAlertConfig{}, &models.BalanceAlertRecord{}); err != nil {
+	if err := db.AutoMigrate(&models.Configs{}, &models.BalanceAlertConfig{}, &models.BalanceAlertRecord{}, &models.BalanceAlertCreditExclude{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return &ctx.Context{DB: db, IsCenter: true}
+	c := &ctx.Context{DB: db, IsCenter: true}
+	// 生产语义：15 分钟轮次的准入条件是一份成功刷新过的排除名单。
+	// 测试默认处于「已就绪」，需要验证 fail closed 的用例自行清空状态。
+	okAt := time.Date(2026, 9, 21, 7, 30, 0, 0, locShanghai)
+	if err := models.BalanceAlertExcludeStatePut(c, models.BalanceAlertExcludeState{LastSuccessAt: &okAt}, "root"); err != nil {
+		t.Fatalf("seed exclude state: %v", err)
+	}
+	return c
 }
 
 func recharge(v float64) *float64 { return &v }

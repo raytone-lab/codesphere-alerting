@@ -98,32 +98,36 @@
 
 **需求描述**：每轮批处理首先圈出全部预付费企业账户。
 
-**业务背景**：后台"资金处理方式"是**写死的展示口径**——企业一经授信即固定标记为授信用户，无法回退为预付费；而授信状态本身会流转（暂停 / 额度清零 / 到期 / 恢复）。若按"授信过没有"圈人，授信已失效、实际靠余额运转的企业（余额耗尽即停服）将被永久漏掉。因此判定依据不看"身份"，看"**当前可用信用**"：每轮动态重查，授信失效的企业自动落回预警池，恢复授信自动离开，不依赖人工改身份。
+**业务背景**：后台"资金处理方式"是**写死的展示口径**——企业一经授信即固定标记为授信用户，无法回退为预付费。v6 曾用"当前可用信用"（`billing_account_credit_configs`）圈人，但仍有两处已验证缺陷：①该表配置一经创建即恒为 `ACTIVE`，状态退化为"是否配置过信用"，已按预付费运营的企业被永久漏报；②授信企业次月对账后代充会触发 FUNDING 自动核销，充值流水 / 钱包余额 / 垫付是否清零都不能作为客群依据。因此 v1.1 改为**信用垫付行为记录 + 时间窗口衰减**判定，并物化排除名单：
+
+- 授信活跃（排除）判定：存在未清垫付债务，或近 `credit_advance_window_days`（默认 90）天内产生过 `approved_credit_usd > 0` 的垫付，或窗口内有 `debt_source='ENTERPRISE_CREDIT'` 的信用核销；
+- 名单每日 07:30（Asia/Shanghai）全量刷新，落在 **alerting 自己的库**（`balance_alert_credit_excludes`，随 alerting 升级由 AutoMigrate 建表）；对计费库只有只读 SELECT，不建表、不写入、不需要 GRANT；
+- 15 分钟判定只读名单集合在内存过滤，不回扫消费明细，也不跨库 join；
+- 从未成功刷新时当轮不圈人、不发送（fail closed）；有旧名单则沿用并累计失败计数。
+- 详见 `docs/企业预付费余额预警-补充预付费企业识别规则-PRD-2026-10-18.md`（v1.1 替代本文 FR-01）。
 
 **实现逻辑**：
 
 ```sql
+-- 每 15 分钟判定：
+--   1) 从计费库取候选企业（只读，不 join 排除名单——名单在 alerting 自己的库）
+--   2) 用名单账户集合在内存里过滤（见 balancealert/exclude.go applyCreditExcludes）
 SELECT a.id
 FROM billing_accounts a
 WHERE a.type = 'enterprise'
   AND a.status = 'active'
   AND a.deleted_at IS NULL
-  AND NOT EXISTS (            -- 存在"可用信用"即视为授信客户，跳过
-      SELECT 1 FROM billing_account_credit_configs c
-      WHERE c.billing_account_id = a.id
-        AND c.status = 'ACTIVE'
-        AND c.limit_usd > 0
-        AND (c.effective_at IS NULL OR c.effective_at <= now())
-        AND (c.expires_at  IS NULL OR c.expires_at  >  now())
-        -- 现状核查（2026-09-20）：当前全部 3 条配置 effective_at / expires_at 均为空（无限期模式），
-        -- 有效期条件为前瞻兼容写法，覆盖未来填了有效期的配置
-  );
+  AND a.provisioning_quarantined_at IS NULL;
+
+-- 每日 07:30 在计费库只读聚合出名单，再整份替换进 alerting 库：
+--   balance_alert_credit_excludes(billing_account_id, reason, refreshed_at)
 ```
 
 **验收标准**：
-- 圈选结果只包含 `type='enterprise'`、active、未删除、**当前无可用信用**的企业；
-- 授信配置被暂停（SUSPENDED）、额度清零或已过期的企业**自动进入圈选**（事实预付费，余额耗尽即停服）；
-- 授信恢复（重新 ACTIVE 且额度 > 0）后，企业自动离开圈选；
+- 圈选结果只包含 `type='enterprise'`、active、未删除、未被半开通隔离、且不在授信排除名单中的企业；
+- 代充核销清零债务后，只要窗口内有新垫付，判定不改变（不再误报）；
+- 债务清零且最后一次垫付超过窗口天数（期间自主充值消费）后自动进入圈选；
+- 从未产生过垫付的企业（含穿 0 未登记垫付）始终在圈选内；
 - `ba_personal_*` 个人账户不出现在结果中。
 
 ### FR-02 提醒线（阈值）计算

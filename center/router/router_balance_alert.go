@@ -84,6 +84,27 @@ func (rt *Router) balanceAlertRun(c *gin.Context) {
 	ginx.NewRender(c).Data(stats, err)
 }
 
+// balanceAlertExcludeStateGet 暴露排除名单刷新健康度。页面用它显示「上次刷新」
+// 与「从未成功」的红色提示 —— fail closed 时运营必须能一眼看出当前没在圈人。
+func (rt *Router) balanceAlertExcludeStateGet(c *gin.Context) {
+	state, err := models.BalanceAlertExcludeStateGet(rt.Ctx)
+	if err != nil {
+		ginx.NewRender(c).Data(nil, err)
+		return
+	}
+	ginx.NewRender(c).Data(struct {
+		models.BalanceAlertExcludeState
+		Ready bool `json:"ready"`
+	}{state, state.Ready()}, nil)
+}
+
+// balanceAlertExcludeRefresh 手动全量刷新，成功后返回名单规模与 reason 分布，
+// 供试点期运营当场核对判定准确性（Q27）。
+func (rt *Router) balanceAlertExcludeRefresh(c *gin.Context) {
+	res, err := balancealert.RefreshCreditExcludes(rt.Ctx, "MANUAL")
+	ginx.NewRender(c).Data(res, err)
+}
+
 func (rt *Router) balanceAlertMissReports(c *gin.Context) {
 	res, err := balancealert.ReconMissReports(rt.Ctx, ginx.QueryInt(c, "days", 7))
 	ginx.NewRender(c).Data(res, err)

@@ -17,7 +17,7 @@ func testBalanceAlertCtx(t *testing.T) *ctx.Context {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&Configs{}, &BalanceAlertConfig{}, &BalanceAlertRecord{}); err != nil {
+	if err := db.AutoMigrate(&Configs{}, &BalanceAlertConfig{}, &BalanceAlertRecord{}, &BalanceAlertCreditExclude{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return &ctx.Context{DB: db, IsCenter: true}
@@ -104,6 +104,11 @@ func TestBalanceAlertSettingsRoundTrip(t *testing.T) {
 	if got.LastRechargePct != 5 {
 		t.Fatalf("missing pct should default to 5: %+v", got)
 	}
+	// 老配置里没有 credit_advance_window_days：读取时必须落到默认 90，
+	// 而不是 0（0 天窗口会让所有授信企业瞬间变成"预付费"）。
+	if got.CreditAdvanceWindowDays != DefaultCreditAdvanceWindowDays {
+		t.Fatalf("missing window should default to %d: %+v", DefaultCreditAdvanceWindowDays, got)
+	}
 
 	off := false
 	got.Enabled = &off
@@ -121,6 +126,51 @@ func TestBalanceAlertSettingsRoundTrip(t *testing.T) {
 	pub := got.Public()
 	if pub.DatasourceID != 2 {
 		t.Fatalf("public: %+v", pub)
+	}
+}
+
+func TestBalanceAlertCreditAdvanceWindow(t *testing.T) {
+	c := testBalanceAlertCtx(t)
+	got, err := BalanceAlertSettingsGet(c)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.CreditAdvanceWindowDays != 90 {
+		t.Fatalf("default window: %+v", got)
+	}
+
+	// 0 / 负数 / 超上限必须拒绝保存（TC-12）：静默纠正会让运营以为口径已改。
+	for _, bad := range []int{0, -1, 366, 1000} {
+		got.CreditAdvanceWindowDays = bad
+		if err := BalanceAlertSettingsPut(c, got, "root"); err == nil {
+			t.Fatalf("window %d should be rejected", bad)
+		}
+	}
+
+	for _, ok := range []int{1, 120, 365} {
+		got.CreditAdvanceWindowDays = ok
+		if err := BalanceAlertSettingsPut(c, got, "root"); err != nil {
+			t.Fatalf("window %d should be accepted: %v", ok, err)
+		}
+		back, err := BalanceAlertSettingsGet(c)
+		if err != nil {
+			t.Fatalf("get %d: %v", ok, err)
+		}
+		if back.CreditAdvanceWindowDays != ok {
+			t.Fatalf("window %d not persisted: %+v", ok, back)
+		}
+	}
+
+	// 存量脏数据（写入侧被绕过）读取时收敛到上限，避免无界窗口。
+	if err := ConfigsSet(c, BalanceAlertSettingsKey, `{"credit_advance_window_days":9999}`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	back, err := BalanceAlertSettingsGet(c)
+	if err != nil {
+		t.Fatalf("get clamped: %v", err)
+	}
+	if back.CreditAdvanceWindowDays != MaxCreditAdvanceWindowDays {
+		t.Fatalf("expected clamp to %d: %+v", MaxCreditAdvanceWindowDays, back)
 	}
 }
 

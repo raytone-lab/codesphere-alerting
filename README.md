@@ -100,11 +100,17 @@
 
 **业务背景**：后台"资金处理方式"是**写死的展示口径**——企业一经授信即固定标记为授信用户，无法回退为预付费。v6 曾用"当前可用信用"（`billing_account_credit_configs`）圈人，但仍有两处已验证缺陷：①该表配置一经创建即恒为 `ACTIVE`，状态退化为"是否配置过信用"，已按预付费运营的企业被永久漏报；②授信企业次月对账后代充会触发 FUNDING 自动核销，充值流水 / 钱包余额 / 垫付是否清零都不能作为客群依据。因此 v1.1 改为**信用垫付行为记录 + 时间窗口衰减**判定，并物化排除名单：
 
-- 授信活跃（排除）判定：存在未清垫付债务，或近 `credit_advance_window_days`（默认 90）天内产生过 `approved_credit_usd > 0` 的垫付，或窗口内有 `debt_source='ENTERPRISE_CREDIT'` 的信用核销；
+- 授信活跃（排除）判定——三个**互相独立**的排除条件，合并或删除任一都会改变客群：
+  1. 存在未清垫付债务（`approved_credit_usd - coalesce(settled_usd,0) > 0.0001`）；
+  2. 近 `credit_advance_window_days`（默认 90）天内产生过 `approved_credit_usd > 0` 的垫付；
+  3. 窗口内有 `debt_source='ENTERPRISE_CREDIT'` 的信用核销。
+  排除期起算点为「最后一次垫付或最后一次核销中较晚者」，因此实际排除期可能长于「最后垫付 + N 天」（见 `docs/adr/0002`）；
 - 名单每日 07:30（Asia/Shanghai）全量刷新，落在 **alerting 自己的库**（`balance_alert_credit_excludes`，随 alerting 升级由 AutoMigrate 建表）；对计费库只有只读 SELECT，不建表、不写入、不需要 GRANT；
 - 15 分钟判定只读名单集合在内存过滤，不回扫消费明细，也不跨库 join；
-- 从未成功刷新时当轮不圈人、不发送（fail closed）；有旧名单则沿用并累计失败计数。
-- 详见 `docs/企业预付费余额预警-补充预付费企业识别规则-PRD-2026-10-18.md`（v1.1 替代本文 FR-01）。
+- 从未成功刷新时当轮不圈人、不发送（fail closed）；有旧名单则沿用并累计失败计数；
+- 被排除企业的自助页只读禁用并显示「当前按信用账期结算，不发送余额预警」，`reason` 细分类别只在运营侧展示；
+- 口径由真库集成测试锁定（TC-01 ~ TC-14）：`BALANCEALERT_PG_DSN=... go test ./balancealert/ -run TestExcludeScan -v`。sqlite 单测跑不了 `make_interval`，不能作为口径验收依据；
+- 详见 `docs/企业预付费余额预警-补充预付费企业识别规则-PRD-2026-10-18.md`（v1.4 替代本文 FR-01）。
 
 **实现逻辑**：
 

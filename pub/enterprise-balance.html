@@ -241,6 +241,19 @@
       color: var(--navy-muted);
     }
     .tag .remove:hover { background: #b42318; color: #fff; }
+    .exclude-banner {
+      margin: 0 0 16px;
+      padding: 14px 16px;
+      border-radius: 10px;
+      border: 1px solid #f0c36d;
+      background: #fffbf0;
+      color: var(--navy-900);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .exclude-banner strong { display: block; margin-bottom: 4px; font-size: 14px; }
+    .exclude-banner p { margin: 0; color: var(--navy-muted); }
+    .list.is-locked { opacity: 0.72; }
     .add-phone {
       display: flex;
       gap: 8px;
@@ -356,13 +369,17 @@
       </div>
 
       <div class="panel" id="panel-settings">
+      <div class="exclude-banner" id="exclude-banner" style="display:none;">
+        <strong id="exclude-notice-text"></strong>
+        <p>转回预付费并完成名单刷新后，本页配置会自动恢复可编辑，无需联系客服解锁。</p>
+      </div>
       <div class="card">
         <div class="card-head">
           <h2>预警配置</h2>
           <p>只影响本企业。修改后点击保存立即生效</p>
         </div>
         <div class="card-body">
-          <ul class="list">
+          <ul class="list" id="settings-list">
             <li class="row">
               <div class="k">预警开关</div>
               <div class="v">
@@ -421,6 +438,7 @@
           </ul>
         </div>
         <div class="save-bar">
+          <button type="button" class="ghost" id="reload-btn">重新加载</button>
           <button type="button" class="ghost" id="reset-btn">重置</button>
           <button type="button" class="primary" id="save-btn">保存配置</button>
         </div>
@@ -511,7 +529,13 @@
       const stateCls = (data.current_state || "NORMAL").toLowerCase();
       const thresholdLabel = data.threshold_mode === "CUSTOM" ? "自定义" : "平台默认";
       const thresholdValue = data.threshold_mode === "CUSTOM" ? money(data.threshold_fixed_usd) : money(data.threshold_usd);
-      $("#status-grid").innerHTML = `
+      // 状态页与配置页说同一句话（都取后端 exclude_notice），前端不自造第二套文案。
+      const banner = data.excluded
+        ? `<div class="exclude-banner" style="grid-column:1/-1;">` +
+            (data.exclude_notice ? `<strong>${esc(data.exclude_notice)}</strong>` : "") +
+            `<p>转回预付费并完成名单刷新后自动恢复。</p></div>`
+        : "";
+      $("#status-grid").innerHTML = banner + `
         <div class="status-item">
           <div class="label">当前余额</div>
           <div class="value">¥${money(data.balance_usd)}</div>
@@ -538,13 +562,40 @@
         container.innerHTML = '<span style="color:var(--navy-faint); font-size:12px;">暂未设置接收手机号</span>';
         return;
       }
+      // 只读态不渲染删除按钮：灰掉的 × 仍然诱人去点，点了没反应更容易被当成 bug。
       container.innerHTML = phones.map((p, i) =>
-        `<span class="tag">${esc(p)}<span class="remove" data-idx="${i}">×</span></span>`
+        `<span class="tag">${esc(p)}${configLocked ? "" : `<span class="remove" data-idx="${i}">×</span>`}</span>`
       ).join("");
+    }
+
+    // 授信排除态：整块只读并展示后端的 exclude_notice。
+    //
+    // 不做「能保存但永不生效」：那是客户最难自查的一种状态。也不让前端自己拼
+    // 文案——说明只有一处来源（后端常量），否则前后端两套说法迟早漂。
+    function setConfigLocked(locked, notice) {
+      configLocked = locked;
+      $("#exclude-banner").style.display = locked ? "block" : "none";
+      // 文案只来自后端 exclude_notice，前端不准备兜底句子：两处各写一份迟早漂。
+      $("#exclude-notice-text").textContent = notice || "";
+      $("#exclude-notice-text").style.display = notice ? "block" : "none";
+      $("#settings-list").classList.toggle("is-locked", locked);
+      // 先收掉 OTP 流程再统一禁用：resetOtpFlow 内部会把手机号输入与「添加」
+      // 按钮重新置为可用，顺序反过来就会在只读态上漏一个可编辑入口。
+      if (locked) {
+        resetOtpFlow(false);
+        $("#otp-wrap").style.display = "none";
+      }
+      document.querySelectorAll("#panel-settings input, #panel-settings button").forEach((el) => {
+        el.disabled = locked;
+      });
+      // 「重新加载」是只读动作，排除态下保留可用。
+      $("#reload-btn").disabled = false;
+      renderPhones();
     }
 
     let pendingPhone = "";
     let otpCooldownTimer = null;
+    let configLocked = false;
 
     function setPhoneInputLocked(locked) {
       const input = $("#phone-input");
@@ -617,6 +668,7 @@
 
       renderPhones();
       renderStatus(data);
+      setConfigLocked(!!data.excluded, data.exclude_notice);
     }
 
     function renderRecords() {
@@ -688,6 +740,10 @@
     }
 
     async function saveConfig() {
+      if (configLocked) {
+        msg((config && config.exclude_notice) || "暂不可修改配置", false);
+        return;
+      }
       const btn = $("#save-btn");
       btn.disabled = true;
       try {
@@ -827,6 +883,7 @@
     });
 
     document.addEventListener("click", (e) => {
+      if (configLocked) return;
       if (e.target.classList.contains("remove")) {
         const idx = Number(e.target.dataset.idx);
         if (!isNaN(idx)) {
@@ -837,6 +894,20 @@
     });
 
     $("#save-btn").addEventListener("click", saveConfig);
+    // 名单在后台刷新后，客户不必反复刷新整页来猜状态。
+    $("#reload-btn").addEventListener("click", async () => {
+      $("#reload-btn").disabled = true;
+      try {
+        await loadConfig();
+        await loadRecords();
+        msg("已重新加载", true);
+      } catch (e) {
+        msg(e.message, false);
+      } finally {
+        // setConfigLocked 会把只读态下的按钮重新置灰，这里只恢复这一个。
+        $("#reload-btn").disabled = false;
+      }
+    });
     $("#reset-btn").addEventListener("click", () => {
       if (config) fillForm(config);
       msg("已重置为上次保存的配置", true);

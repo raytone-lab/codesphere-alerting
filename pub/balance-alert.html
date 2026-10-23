@@ -424,7 +424,7 @@
                   <input name="credit_advance_window_days" type="number" step="1" min="1" max="365" required />
                   <em>天</em>
                 </div>
-                <p class="note">窗口内产生过信用垫付、或仍有未清垫付债务的企业判定为授信活跃，不进预警池。默认 90，范围 1–365；改后需刷新名单才生效。</p>
+                <p class="note">满足任一即判定为授信活跃、不进预警池：仍有未清垫付债务；窗口内产生过信用垫付；窗口内有信用核销。排除期起算点取「最后一次垫付或最后一次核销中较晚者」，因此实际可能长于「最后垫付 + 窗口天数」——到期了还在名单里是正常的。默认 90，范围 1–365；改后需刷新名单才生效。</p>
               </div>
             </li>
             <li class="row">
@@ -558,6 +558,13 @@
       RECENT_ADVANCE: "窗口内新垫付",
       RECENT_SETTLEMENT: "窗口内信用核销"
     };
+    // 三个 reason 的中文译名只在 EXCLUDE_REASON 里定义一次：清单里再写一遍
+    // 就会出现「改了映射、某处文案还是旧的」这种漂移。
+    function reasonSummary(reasons) {
+      return Object.keys(EXCLUDE_REASON)
+        .map((k) => EXCLUDE_REASON[k] + " " + ((reasons || {})[k] || 0))
+        .join(" · ");
+    }
     function renderExcludeState(st) {
       const el = $("#exclude-state");
       if (!st) {
@@ -569,13 +576,17 @@
         return;
       }
       const reasons = st.reasons || {};
-      let html = "上次成功 <b>" + esc(fmtTime(st.last_success_at)) + "</b> · 名单 <b>" + (st.total || 0) + "</b> 家" +
-        "（未清垫付 " + (reasons.OPEN_DEBT || 0) +
-        " · 窗口内新垫付 " + (reasons.RECENT_ADVANCE || 0) +
-        " · 窗口内核销 " + (reasons.RECENT_SETTLEMENT || 0) + "）" +
+      // 名单规模（list_total，名单当前行数）与「本轮命中」（判定轮次实际过滤掉的
+      // 候选数）是两个口径：名单不按账户状态过滤，可能含已暂停/已删除账户。
+      const listTotal = st.list_total != null ? st.list_total : (st.total || 0);
+      let html = "上次成功 <b>" + esc(fmtTime(st.last_success_at)) + "</b> · 名单 <b>" + listTotal + "</b> 家" +
+        "（" + esc(reasonSummary(reasons)) + "）" +
         " · 窗口 <b>" + (st.window_days || 90) + "</b> 天";
       if (st.consecutive_failures) {
         html += ' · <span class="bad">连续失败 ' + st.consecutive_failures + " 次（仍在用旧名单）</span>";
+        if (st.last_attempt_at) {
+          html += ' · <span class="bad">最近失败 <b>' + esc(fmtTime(st.last_attempt_at)) + "</b></span>";
+        }
       }
       if (st.last_error) {
         html += '<br><span class="bad">' + esc(st.last_error) + "</span>";
@@ -917,9 +928,7 @@
         const res = await api("/balance-alert/exclude-refresh", { method: "POST" }) || {};
         const reasons = res.reasons || {};
         await loadExcludeState();
-        excludeMsg("已刷新：" + (res.total || 0) + " 家（未清垫付 " + (reasons.OPEN_DEBT || 0) +
-          " · 窗口内新垫付 " + (reasons.RECENT_ADVANCE || 0) +
-          " · 窗口内核销 " + (reasons.RECENT_SETTLEMENT || 0) + "），耗时 " + (res.duration_ms || 0) + "ms", true);
+        excludeMsg("已刷新：" + (res.total || 0) + " 家（" + reasonSummary(reasons) + "），耗时 " + (res.duration_ms || 0) + "ms", true);
       } catch (err) {
         await loadExcludeState();
         excludeMsg("刷新失败：" + err.message, false);
@@ -945,10 +954,15 @@
         const s = await api("/balance-alert/run", { method: "POST" });
         if (s && s.disabled) {
           msg("预警已停用，本轮未执行", true);
+        } else if (s && s.exclude_blocked) {
+          msg("排除名单从未成功刷新，本轮已停止圈选（fail closed），请先刷新名单", false);
         } else {
-          msg("本轮完成：圈选 " + s.prepaid + " 家，发送 " + s.sent + "，限频 " + s.cooldown + "，失败 " + s.failed, true);
+          // 本轮命中 = 落在候选集内、被排除名单过滤掉的账户数，与名单规模是两个口径。
+          msg("本轮完成：排除 " + (s.excluded || 0) + " 家（名单内命中），圈选 " + s.prepaid +
+              " 家，发送 " + s.sent + "，限频 " + s.cooldown + "，失败 " + s.failed, true);
         }
         await loadRecords();
+        await loadExcludeState();
       } catch (err) { msg(err.message, false); }
     };
     $("#reload").onclick = () => loadRecords().then(() => msg("记录已刷新", true)).catch((e) => msg(e.message, false));

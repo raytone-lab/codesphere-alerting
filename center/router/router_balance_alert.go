@@ -12,6 +12,7 @@ import (
 	"github.com/ccfos/nightingale/v6/pkg/ginx"
 
 	"github.com/gin-gonic/gin"
+	"github.com/toolkits/pkg/logger"
 )
 
 func (rt *Router) balanceAlertNotifyRulesGet(c *gin.Context) {
@@ -48,7 +49,24 @@ func (rt *Router) balanceAlertSettingsPut(c *gin.Context) {
 	var s models.BalanceAlertSettings
 	ginx.BindJSON(c, &s)
 	username := c.MustGet("username").(string)
-	ginx.NewRender(c).Message(models.BalanceAlertSettingsPut(rt.Ctx, s, username))
+
+	prev, err := models.BalanceAlertSettingsGet(rt.Ctx)
+	if err != nil {
+		ginx.NewRender(c).Message(err)
+		return
+	}
+	if err := models.BalanceAlertSettingsPut(rt.Ctx, s, username); err != nil {
+		ginx.NewRender(c).Message(err)
+		return
+	}
+	// 告警停用期间发生的失败不会被投递；开关一打开就补报，否则「从未成功
+	// 刷新」要等到下一次失败（最长一天后）才重新可见。
+	if !prev.AlertEnabled() {
+		if now, err := models.BalanceAlertSettingsGet(rt.Ctx); err == nil && now.AlertEnabled() {
+			balancealert.NotifyPendingExcludeOpsAsync(rt.Ctx)
+		}
+	}
+	ginx.NewRender(c).Message(nil)
 }
 
 func (rt *Router) balanceAlertRecordsGet(c *gin.Context) {
@@ -86,22 +104,36 @@ func (rt *Router) balanceAlertRun(c *gin.Context) {
 
 // balanceAlertExcludeStateGet 暴露排除名单刷新健康度。页面用它显示「上次刷新」
 // 与「从未成功」的红色提示 —— fail closed 时运营必须能一眼看出当前没在圈人。
+//
+// list_total 是名单当前行数（名单规模），与判定轮次的 Stats.Excluded（本轮命中）
+// 是两个口径：名单不按账户状态过滤，可能含已暂停/已删除账户，所以「名单 400 家、
+// 本轮只排除 12 家」是正常的。两者并列展示才能解释这个差异。
 func (rt *Router) balanceAlertExcludeStateGet(c *gin.Context) {
 	state, err := models.BalanceAlertExcludeStateGet(rt.Ctx)
 	if err != nil {
 		ginx.NewRender(c).Data(nil, err)
 		return
 	}
+	_, listTotal, err := models.BalanceAlertCreditExcludeReasonCounts(rt.Ctx)
+	if err != nil {
+		// 这是诊断端点：计数失败不该让「名单是否可用」也查不到。
+		// 退回上次成功刷新时记录的行数，并在响应里保留 last_error。
+		logger.Warningf("balancealert exclude-state: count list rows: %v", err)
+		listTotal = state.Total
+	}
 	ginx.NewRender(c).Data(struct {
 		models.BalanceAlertExcludeState
-		Ready bool `json:"ready"`
-	}{state, state.Ready()}, nil)
+		Ready     bool `json:"ready"`
+		ListTotal int  `json:"list_total"`
+	}{state, state.Ready(), listTotal}, nil)
 }
 
 // balanceAlertExcludeRefresh 手动全量刷新，成功后返回名单规模与 reason 分布，
-// 供试点期运营当场核对判定准确性（Q27）。
+// 供试点期运营当场核对判定准确性。
+//
+// 失败只回显在页面上，不推钉钉：点按钮的人就在页面上，再推一条只是重复告知。
 func (rt *Router) balanceAlertExcludeRefresh(c *gin.Context) {
-	res, err := balancealert.RefreshCreditExcludes(rt.Ctx, "MANUAL")
+	res, err := balancealert.RefreshCreditExcludes(rt.Ctx, balancealert.TriggerManual)
 	ginx.NewRender(c).Data(res, err)
 }
 
@@ -236,6 +268,21 @@ func myAccountMissingMsg(reason string) string {
 	return "未找到关联的预付费企业账户"
 }
 
+// myExcludeView 把「该账户是否在授信排除名单内」翻译成自助页需要的两个字段。
+//
+// 只暴露布尔值与一句客户可读文案，不暴露 reason 细分类别：OPEN_DEBT /
+// RECENT_SETTLEMENT 这类内部归因对客户既不可操作也是困惑源，只留在运营页。
+func (rt *Router) myExcludeView(accountID string) (bool, string, error) {
+	_, excluded, err := models.BalanceAlertCreditExcludeGet(rt.Ctx, accountID)
+	if err != nil {
+		return false, "", err
+	}
+	if !excluded {
+		return false, "", nil
+	}
+	return true, models.ExcludeNoticeCustomer, nil
+}
+
 func (rt *Router) balanceAlertMyConfigGet(c *gin.Context) {
 	acc, reason, err := rt.resolveMyBillingAccount(c)
 	if err != nil {
@@ -244,6 +291,11 @@ func (rt *Router) balanceAlertMyConfigGet(c *gin.Context) {
 	}
 	if acc == nil {
 		ginx.NewRender(c).Data(myAccountEmpty(reason), nil)
+		return
+	}
+	excluded, notice, err := rt.myExcludeView(acc.ID)
+	if err != nil {
+		ginx.NewRender(c).Data(nil, err)
 		return
 	}
 	cfg, err := models.BalanceAlertConfigGet(rt.Ctx, acc.ID)
@@ -265,6 +317,9 @@ func (rt *Router) balanceAlertMyConfigGet(c *gin.Context) {
 		"receivers":               []string{},
 		"dynamic_enabled":         false,
 		"current_state":           models.BalanceAlertStateNormal,
+		// 排除态：配置仍然回显（让客户看到当前值），但前端必须整块只读禁用。
+		"excluded":       excluded,
+		"exclude_notice": notice,
 	}
 	if cfg != nil {
 		out["enabled"] = cfg.Enabled
@@ -297,6 +352,15 @@ func (rt *Router) balanceAlertMyConfigPut(c *gin.Context) {
 	}
 	if acc == nil {
 		ginx.NewRender(c).Message(myAccountMissingMsg(reason))
+		return
+	}
+	// 排除态下拒绝写入：允许保存但永不生效是最差的组合——客户会以为设置成功了。
+	// 复用 GET 的同一句文案，不另造状态码。
+	if excluded, notice, err := rt.myExcludeView(acc.ID); err != nil {
+		ginx.NewRender(c).Message(err)
+		return
+	} else if excluded {
+		ginx.NewRender(c).Message(notice + "，暂不可修改")
 		return
 	}
 	var body struct {
@@ -420,6 +484,11 @@ func (rt *Router) balanceAlertMyStatusGet(c *gin.Context) {
 		ginx.NewRender(c).Data(myAccountEmpty(reason), nil)
 		return
 	}
+	excluded, notice, err := rt.myExcludeView(acc.ID)
+	if err != nil {
+		ginx.NewRender(c).Data(nil, err)
+		return
+	}
 	cfg, err := models.BalanceAlertConfigGet(rt.Ctx, acc.ID)
 	if err != nil {
 		ginx.NewRender(c).Data(nil, err)
@@ -434,6 +503,9 @@ func (rt *Router) balanceAlertMyStatusGet(c *gin.Context) {
 		"platform_threshold_usd": 0,
 		"dynamic_enabled":        false,
 		"last_alert_at":          nil,
+		// 与 my-config 同源同值：两个页面说法不一致比不说更糟。
+		"excluded":       excluded,
+		"exclude_notice": notice,
 	}
 	if cfg != nil {
 		out["current_state"] = cfg.CurrentState

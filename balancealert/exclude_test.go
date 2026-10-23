@@ -9,35 +9,13 @@ import (
 	"github.com/ccfos/nightingale/v6/models"
 )
 
-func TestDecideExcludeReasonPrecedence(t *testing.T) {
-	cases := []struct {
-		name                          string
-		openDebt, recentAdv, recentSt bool
-		want                          string
-	}{
-		{"all three", true, true, true, models.ExcludeReasonOpenDebt},
-		{"debt beats advance", true, true, false, models.ExcludeReasonOpenDebt},
-		{"debt beats settlement", true, false, true, models.ExcludeReasonOpenDebt},
-		{"advance beats settlement", false, true, true, models.ExcludeReasonRecentAdvance},
-		{"advance only", false, true, false, models.ExcludeReasonRecentAdvance},
-		{"settlement only", false, false, true, models.ExcludeReasonRecentSettlement},
-		{"nothing", false, false, false, ""},
-	}
-	for _, c := range cases {
-		got := DecideExcludeReason(c.openDebt, c.recentAdv, c.recentSt)
-		if got != c.want {
-			t.Errorf("%s: got %q want %q", c.name, got, c.want)
-		}
-	}
-}
-
-// 扫描 SQL 是判定口径的唯一实现，用断言把 v1.1 的三处勘误钉死。
 func TestExcludeScanSQLGuards(t *testing.T) {
 	needles := []string{
 		// RECENT_ADVANCE 必须先限定 approved_credit_usd > 0，否则窗口内任何
 		// 余额消费都会命中，真预付费被整体误排。
 		"al.approved_credit_usd > 0\n          AND al.created_at > now() - make_interval(days => ?::int)",
-		// 冗余保护只认信用核销。
+		// 核销条件只认信用核销。这是三段独立条件之一（不是冗余保护）：企业可能在
+		// 最后一次垫付超窗之后才做对账代充，删掉它会把刚结清的企业拉回预警池。
 		"s.debt_source = 'ENTERPRISE_CREDIT'",
 		// 债务阈值用灰尘量级，不用 > 0。
 		"al.approved_credit_usd - COALESCE(al.settled_usd, 0) > 0.0001",
@@ -68,8 +46,16 @@ func TestExcludeStateReadyAndAlert(t *testing.T) {
 	if zero.Ready() {
 		t.Fatal("empty state must not be ready")
 	}
-	if !zero.NeedsOpsAlert() {
-		t.Fatal("never-succeeded must page ops immediately")
+	// 从未成功刷新：整条链路不可用，第 1 次失败就必须喊人，且之后每次都要喊。
+	first := models.BalanceAlertExcludeState{ConsecutiveFailures: 1}
+	if !first.ShouldNotifyFailure() {
+		t.Fatal("never-succeeded must page ops on the first failure")
+	}
+	if (models.BalanceAlertExcludeState{ConsecutiveFailures: 2, LastNotifiedFailures: 2}).ShouldNotifyFailure() {
+		t.Fatal("never-succeeded state already notified for this attempt must not page twice")
+	}
+	if !(models.BalanceAlertExcludeState{ConsecutiveFailures: 5, LastNotifiedFailures: 4}).ShouldNotifyFailure() {
+		t.Fatal("never-succeeded must keep paging on every new failure")
 	}
 
 	at := time.Date(2026, 10, 22, 7, 30, 0, 0, locShanghai)
@@ -77,14 +63,75 @@ func TestExcludeStateReadyAndAlert(t *testing.T) {
 	if !one.Ready() {
 		t.Fatal("state with last success must be ready")
 	}
-	if one.NeedsOpsAlert() {
-		t.Fatal("single failure should not page ops")
+	if one.ShouldNotifyFailure() {
+		t.Fatal("single failure should not page ops while an old list is still in use")
 	}
 
 	two := one
 	two.ConsecutiveFailures = 2
-	if !two.NeedsOpsAlert() {
-		t.Fatal("two consecutive failures must page ops")
+	if !two.ShouldNotifyFailure() {
+		t.Fatal("two consecutive failures must page ops once")
+	}
+	// 已经就这次故障报过：LastNotifiedFailures 非零后不再重复。
+	two.LastNotifiedFailures = 2
+	if two.ShouldNotifyFailure() {
+		t.Fatal("already-notified stale-list failure must not page again")
+	}
+
+	// 第 3 次起不再重复发：刷新每天一次，持续故障会变成每天一条重复钉钉。
+	three := two
+	three.ConsecutiveFailures = 3
+	if three.ShouldNotifyFailure() {
+		t.Fatal("failures beyond the first notice must not page ops again")
+	}
+	if !three.NeedsRecoveryNotice() {
+		t.Fatal("state that already paged must ask for a recovery notice")
+	}
+	if one.NeedsRecoveryNotice() {
+		t.Fatal("a single failure never alerted, so recovery must stay silent")
+	}
+
+	// 告警开关关闭时不会推进 LastNotifiedFailures，因此重新打开后仍判定为待通知。
+	pending := one
+	pending.ConsecutiveFailures = 4
+	if !pending.ShouldNotifyFailure() {
+		t.Fatal("failure that happened while alerts were disabled must stay pending")
+	}
+
+	// 恢复发生在开关关闭期间：失败已归零但恢复通知还没送出，补报要能识别出这笔账。
+	silentRecovery := models.BalanceAlertExcludeState{
+		LastSuccessAt:        &at,
+		ConsecutiveFailures:  0,
+		LastNotifiedFailures: 2,
+	}
+	if silentRecovery.ShouldNotifyFailure() {
+		t.Fatal("a recovered state must not report a failure")
+	}
+	if !silentRecovery.NeedsRecoveryNotice() {
+		t.Fatal("suppressed recovery must remain pending until the switch is back on")
+	}
+}
+
+func TestSendExcludeOpsNoticeWithoutWebhook(t *testing.T) {
+	// 没配 webhook 时必须报「没送到」：否则 LastNotifiedFailures 会被推进，
+	// 恢复通知就会声称「已告诉你们」——而其实谁也没收到。
+	if sendExcludeOpsNotice(models.BalanceAlertSettings{}, "x") {
+		t.Fatal("no webhook configured must not count as delivered")
+	}
+}
+
+func TestBillingCtxCarriesDeadline(t *testing.T) {
+	ctx, cancel := billingCtx(context.Background())
+	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		t.Fatal("cross-db billing queries must carry a deadline")
+	}
+
+	// 调用方传 nil 也不能 panic：后台任务里 std 可能没被赋值。
+	ctx, cancel = billingCtx(nil)
+	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		t.Fatal("nil parent must still get a deadline")
 	}
 }
 

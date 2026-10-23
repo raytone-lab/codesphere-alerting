@@ -306,6 +306,15 @@ func MigrateTables(db *gorm.DB) error {
 		}
 	}
 
+	// AutoMigrate 不会给**已存在**的列补默认值：名单表在上一版已经建好，
+	// refreshed_at 当时没有默认值。这里显式补齐，与 PRD 的 DDL 对齐。
+	// SET DEFAULT 幂等，多副本并发执行无副作用；只动这一张派生表。
+	if isPostgres(db) && db.Migrator().HasTable(&models.BalanceAlertCreditExclude{}) {
+		if err := db.Exec("ALTER TABLE balance_alert_credit_excludes ALTER COLUMN refreshed_at SET DEFAULT now()").Error; err != nil {
+			logger.Errorf("failed to set default on balance_alert_credit_excludes.refreshed_at: %v", err)
+		}
+	}
+
 	if db.Migrator().HasColumn(&AlertingEngines{}, "cluster") {
 		err := db.Migrator().RenameColumn(&AlertingEngines{}, "cluster", "engine_cluster")
 		if err != nil {

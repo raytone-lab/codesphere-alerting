@@ -105,7 +105,9 @@ type BalanceAlertSettings struct {
 	VoucherThresholdUSD     float64  `json:"voucher_threshold_usd"`
 	LastRechargePct         float64  `json:"last_recharge_pct"`
 	CriticalRepeatDays      int      `json:"critical_repeat_days"`
-	CreditAdvanceWindowDays int      `json:"credit_advance_window_days"`
+	// 指针语义：nil 表示调用方没有提供该字段（沿用已存值），不是「0 天」。
+	// 新增一个可选调参字段不该让仍按旧 schema 调用的脚本整体失败。
+	CreditAdvanceWindowDays *int     `json:"credit_advance_window_days"`
 	DatasourceID            int64    `json:"datasource_id"`
 	SmsWebhook              string   `json:"sms_webhook,omitempty"` // legacy; prefer CustomerNotifyRuleID
 	CustomerPhoneSQLHint    string   `json:"customer_phone_sql_hint,omitempty"`
@@ -138,6 +140,10 @@ func boolPtr(v bool) *bool {
 	return &b
 }
 
+func intPtr(v int) *int {
+	return &v
+}
+
 func DefaultBalanceAlertSettings() BalanceAlertSettings {
 	return BalanceAlertSettings{
 		Enabled:                 boolPtr(true),
@@ -146,8 +152,26 @@ func DefaultBalanceAlertSettings() BalanceAlertSettings {
 		VoucherThresholdUSD:     20,
 		LastRechargePct:         DefaultLastRechargePct,
 		CriticalRepeatDays:      DefaultCriticalRepeatDays,
-		CreditAdvanceWindowDays: DefaultCreditAdvanceWindowDays,
+		CreditAdvanceWindowDays: intPtr(DefaultCreditAdvanceWindowDays),
 	}
+}
+
+// WindowDays 返回生效的授信活跃判定窗口，供跨库扫描使用。
+//
+// nil 回退默认值；存进来的越界值在读取时收敛到合法区间，避免一条脏配置让
+// 每日刷新去扫一个不合理的区间（写入路径会严格拒绝越界值，见 BalanceAlertSettingsPut）。
+func (s BalanceAlertSettings) WindowDays() int {
+	if s.CreditAdvanceWindowDays == nil {
+		return DefaultCreditAdvanceWindowDays
+	}
+	days := *s.CreditAdvanceWindowDays
+	if days <= 0 {
+		return DefaultCreditAdvanceWindowDays
+	}
+	if days > MaxCreditAdvanceWindowDays {
+		return MaxCreditAdvanceWindowDays
+	}
+	return days
 }
 
 func (s BalanceAlertSettings) AlertEnabled() bool {
@@ -188,11 +212,8 @@ func BalanceAlertSettingsGet(ctx *ctx.Context) (BalanceAlertSettings, error) {
 	if s.CriticalRepeatDays <= 0 {
 		s.CriticalRepeatDays = DefaultCriticalRepeatDays
 	}
-	if s.CreditAdvanceWindowDays <= 0 {
-		s.CreditAdvanceWindowDays = DefaultCreditAdvanceWindowDays
-	} else if s.CreditAdvanceWindowDays > MaxCreditAdvanceWindowDays {
-		s.CreditAdvanceWindowDays = MaxCreditAdvanceWindowDays
-	}
+	// 读取路径统一走 WindowDays()，保证「非法存量值如何收敛」只有一处实现。
+	s.CreditAdvanceWindowDays = intPtr(s.WindowDays())
 	if s.PilotReceivers == nil {
 		s.PilotReceivers = []string{}
 	}
@@ -230,9 +251,16 @@ func BalanceAlertSettingsPut(ctx *ctx.Context, s BalanceAlertSettings, username 
 	if s.CriticalRepeatDays <= 0 {
 		s.CriticalRepeatDays = DefaultCriticalRepeatDays
 	}
-	// 窗口参数直接决定客群判定，非法值必须拒绝保存而不是静默纠正
-	// （静默纠正会让运营以为已改、实际口径未变）。
-	if s.CreditAdvanceWindowDays < MinCreditAdvanceWindowDays || s.CreditAdvanceWindowDays > MaxCreditAdvanceWindowDays {
+	// 窗口参数直接决定客群判定：显式非法值必须拒绝保存而不是静默纠正
+	// （静默纠正会让运营以为已改、实际口径未变）；未提供该字段时沿用已存值，
+	// 避免按旧 schema 调用的脚本因为少一个字段就整体失败。
+	if s.CreditAdvanceWindowDays == nil {
+		prev, err := BalanceAlertSettingsGet(ctx)
+		if err != nil {
+			return err
+		}
+		s.CreditAdvanceWindowDays = prev.CreditAdvanceWindowDays
+	} else if *s.CreditAdvanceWindowDays < MinCreditAdvanceWindowDays || *s.CreditAdvanceWindowDays > MaxCreditAdvanceWindowDays {
 		return errors.Errorf("识别窗口必须为 %d–%d 的整数天", MinCreditAdvanceWindowDays, MaxCreditAdvanceWindowDays)
 	}
 	if s.PilotReceivers == nil {

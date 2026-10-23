@@ -15,6 +15,22 @@ import (
 	"gorm.io/gorm"
 )
 
+// billingQueryTimeout 是 alerting 读计费库的单次查询上限。
+//
+// alerting 对计费库只有只读权限，但慢查询或行锁同样能把调用方挂死：15 分钟轮次
+// 会一直占着 runMu（后续轮次全部排队），手动刷新会挂住 HTTP 请求，漏报对账同理。
+// 数据源的 Query 路径自带 60s 超时，但走 PGStore 的 Raw 查询绕过了那层，所以
+// deadline 必须在这里加，而不是指望调用方传 Background。
+const billingQueryTimeout = 60 * time.Second
+
+// billingCtx 给跨库查询套统一超时；parent 为 nil 时回退 Background。
+func billingCtx(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, billingQueryTimeout)
+}
+
 // PrepaidSelectSQL is FR-01 (v1.1) 的**候选集**：enterprise、active、未删除、
 // 未被半开通隔离。授信活跃的剔除不在这里做——排除名单已物化在 alerting 自己的库，
 // 跨库无法反连接，改由 applyCreditExcludes 用内存集合过滤（见 exclude.go）。
@@ -90,6 +106,9 @@ SELECT a.id,
 FROM users u
 JOIN billing_accounts a ON a.owner_user_id = u.id
   AND a.type = 'enterprise' AND a.status = 'active' AND a.deleted_at IS NULL
+  -- 必须与候选集（PrepaidSelectSQL）逐字一致：自助页说「你在预警池里」、圈选却
+  -- 跳过这个账户，是最难排查的一类不一致。
+  AND a.provisioning_quarantined_at IS NULL
 LEFT JOIN account_wallets w ON w.billing_account_id = a.id
 LEFT JOIN (
   SELECT DISTINCT ON (billing_account_id)
@@ -169,6 +188,8 @@ func wrapBillingSelectErr(err error) error {
 }
 
 func (s *PGStore) ListPrepaid(ctx context.Context) ([]Account, error) {
+	ctx, cancel := billingCtx(ctx)
+	defer cancel()
 	rows, err := s.db.WithContext(ctx).Raw(PrepaidSelectSQL).Rows()
 	if err != nil {
 		return nil, wrapBillingSelectErr(err)
@@ -196,6 +217,8 @@ func (s *PGStore) ListPrepaid(ctx context.Context) ([]Account, error) {
 }
 
 func (s *PGStore) ListConsumption(ctx context.Context) ([]Consumption, error) {
+	ctx, cancel := billingCtx(ctx)
+	defer cancel()
 	rows, err := s.db.WithContext(ctx).Raw(ConsumptionSelectSQL).Rows()
 	if err != nil {
 		return nil, wrapBillingSelectErr(err)
@@ -219,6 +242,8 @@ func (s *PGStore) ResolveAccountByEmailOrPhone(ctx context.Context, email, phone
 	if email == "" && phone == "" {
 		return nil, nil
 	}
+	ctx, cancel := billingCtx(ctx)
+	defer cancel()
 	var a MyAccount
 	var last sql.NullFloat64
 	row := s.db.WithContext(ctx).Raw(ResolveAccountByEmailOrPhoneSQL, email, email, phone, phone).Row()
@@ -240,6 +265,8 @@ func (s *PGStore) ResolveAccountByEmailOrPhone(ctx context.Context, email, phone
 }
 
 func (s *PGStore) ListBillingUsers(ctx context.Context) ([]BillingUser, error) {
+	ctx, cancel := billingCtx(ctx)
+	defer cancel()
 	rows, err := s.db.WithContext(ctx).Raw(BillingUserSelectSQL).Rows()
 	if err != nil {
 		return nil, wrapBillingSelectErr(err)
@@ -260,6 +287,8 @@ func (s *PGStore) ListBillingUsers(ctx context.Context) ([]BillingUser, error) {
 // ScanCreditExcludes 只读计费库：每日一次聚合，算出授信活跃账户与其主因。
 // 本方法不写入计费库任何表，alerting 侧对该库不需要 INSERT/UPDATE/DELETE 权限。
 func (s *PGStore) ScanCreditExcludes(ctx context.Context, windowDays int) (map[string]string, error) {
+	ctx, cancel := billingCtx(ctx)
+	defer cancel()
 	rows, err := s.db.WithContext(ctx).Raw(excludeScanSQL, windowDays, windowDays).Rows()
 	if err != nil {
 		return nil, wrapBillingSelectErr(err)

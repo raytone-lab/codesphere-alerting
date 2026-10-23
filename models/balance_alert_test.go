@@ -1,6 +1,8 @@
 package models
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,7 +108,7 @@ func TestBalanceAlertSettingsRoundTrip(t *testing.T) {
 	}
 	// 老配置里没有 credit_advance_window_days：读取时必须落到默认 90，
 	// 而不是 0（0 天窗口会让所有授信企业瞬间变成"预付费"）。
-	if got.CreditAdvanceWindowDays != DefaultCreditAdvanceWindowDays {
+	if got.CreditAdvanceWindowDays == nil || *got.CreditAdvanceWindowDays != DefaultCreditAdvanceWindowDays {
 		t.Fatalf("missing window should default to %d: %+v", DefaultCreditAdvanceWindowDays, got)
 	}
 
@@ -135,20 +137,22 @@ func TestBalanceAlertCreditAdvanceWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.CreditAdvanceWindowDays != 90 {
+	if got.WindowDays() != 90 {
 		t.Fatalf("default window: %+v", got)
 	}
 
 	// 0 / 负数 / 超上限必须拒绝保存（TC-12）：静默纠正会让运营以为口径已改。
 	for _, bad := range []int{0, -1, 366, 1000} {
-		got.CreditAdvanceWindowDays = bad
+		v := bad
+		got.CreditAdvanceWindowDays = &v
 		if err := BalanceAlertSettingsPut(c, got, "root"); err == nil {
 			t.Fatalf("window %d should be rejected", bad)
 		}
 	}
 
 	for _, ok := range []int{1, 120, 365} {
-		got.CreditAdvanceWindowDays = ok
+		v := ok
+		got.CreditAdvanceWindowDays = &v
 		if err := BalanceAlertSettingsPut(c, got, "root"); err != nil {
 			t.Fatalf("window %d should be accepted: %v", ok, err)
 		}
@@ -156,21 +160,76 @@ func TestBalanceAlertCreditAdvanceWindow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get %d: %v", ok, err)
 		}
-		if back.CreditAdvanceWindowDays != ok {
+		if back.WindowDays() != ok {
 			t.Fatalf("window %d not persisted: %+v", ok, back)
 		}
+	}
+
+	// 非整数在 JSON 解码阶段就被拒绝（指针 int 无法接收 1.5），不会走到范围校验。
+	var raw BalanceAlertSettings
+	if err := json.Unmarshal([]byte(`{"credit_advance_window_days":1.5}`), &raw); err == nil {
+		t.Fatalf("fractional window must be rejected, got %+v", raw.CreditAdvanceWindowDays)
+	}
+
+	// 未提供该字段（nil）时沿用已存值，不能把老格式的调用整体打回。
+	prev, err := BalanceAlertSettingsGet(c)
+	if err != nil {
+		t.Fatalf("get prev: %v", err)
+	}
+	carried := prev
+	carried.CreditAdvanceWindowDays = nil
+	if err := BalanceAlertSettingsPut(c, carried, "root"); err != nil {
+		t.Fatalf("nil window should carry over: %v", err)
+	}
+	back, err := BalanceAlertSettingsGet(c)
+	if err != nil {
+		t.Fatalf("get carried: %v", err)
+	}
+	if back.WindowDays() != prev.WindowDays() {
+		t.Fatalf("nil window must carry over %d, got %d", prev.WindowDays(), back.WindowDays())
 	}
 
 	// 存量脏数据（写入侧被绕过）读取时收敛到上限，避免无界窗口。
 	if err := ConfigsSet(c, BalanceAlertSettingsKey, `{"credit_advance_window_days":9999}`); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	back, err := BalanceAlertSettingsGet(c)
+	back, err = BalanceAlertSettingsGet(c)
 	if err != nil {
 		t.Fatalf("get clamped: %v", err)
 	}
-	if back.CreditAdvanceWindowDays != MaxCreditAdvanceWindowDays {
+	if back.WindowDays() != MaxCreditAdvanceWindowDays {
 		t.Fatalf("expected clamp to %d: %+v", MaxCreditAdvanceWindowDays, back)
+	}
+}
+
+func TestBalanceAlertCreditExcludeGet(t *testing.T) {
+	c := testBalanceAlertCtx(t)
+
+	if _, ok, err := BalanceAlertCreditExcludeGet(c, "missing"); err != nil || ok {
+		t.Fatalf("missing account: ok=%v err=%v", ok, err)
+	}
+	// 空 ID 不该打库，也不该命中：自助页在定位失败时会传空串。
+	if _, ok, err := BalanceAlertCreditExcludeGet(c, ""); err != nil || ok {
+		t.Fatalf("empty id: ok=%v err=%v", ok, err)
+	}
+
+	if err := BalanceAlertCreditExcludeReplace(c, []BalanceAlertCreditExclude{
+		{BillingAccountID: "ba-credit", Reason: ExcludeReasonRecentSettlement, RefreshedAt: time.Now()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reason, ok, err := BalanceAlertCreditExcludeGet(c, "ba-credit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || reason != ExcludeReasonRecentSettlement {
+		t.Fatalf("ok=%v reason=%q", ok, reason)
+	}
+	// 客户侧文案只说明授信账期，不能出现内部归因。
+	if strings.Contains(ExcludeNoticeCustomer, ExcludeReasonRecentSettlement) ||
+		strings.Contains(ExcludeNoticeCustomer, "核销") ||
+		strings.Contains(ExcludeNoticeCustomer, "垫付") {
+		t.Fatalf("customer notice must not leak internal reasons: %q", ExcludeNoticeCustomer)
 	}
 }
 

@@ -214,12 +214,12 @@ func (rt *Router) balanceAlertExcludesGet(c *gin.Context) {
 		RefreshedAt      time.Time `json:"refreshed_at"`
 		// Found=false 表示计费库查不到这个账户（可能已被物理删除），
 		// 与「补充查询失败」不同：后者会让 enrich_error 非空，此时 found 无意义。
-		Found         bool   `json:"found"`
+		Found          bool   `json:"found"`
 		EnterpriseName string `json:"enterprise_name,omitempty"`
-		AccountType   string `json:"account_type,omitempty"`
-		AccountStatus string `json:"account_status,omitempty"`
-		Deleted       bool   `json:"deleted"`
-		Quarantined   bool   `json:"quarantined"`
+		AccountType    string `json:"account_type,omitempty"`
+		AccountStatus  string `json:"account_status,omitempty"`
+		Deleted        bool   `json:"deleted"`
+		Quarantined    bool   `json:"quarantined"`
 		// Hits 是**按当前计费库实时重算**的三条命中，可能比名单新。
 		// 三条皆假 = 现在已不该排除（名单还没到下次刷新）。
 		Hits hits `json:"hits"`

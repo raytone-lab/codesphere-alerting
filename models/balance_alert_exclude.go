@@ -155,18 +155,18 @@ type BalanceAlertExcludeState struct {
 	//
 	// 必须分开记：只靠时间戳推断「通知有没有发出去」不可靠，告警开关关闭期间失败
 	// 照常累加但不投递，用单一时戳会让重新打开开关后再也报不出来。
-	ConsecutiveFailures  int            `json:"consecutive_failures"`
-	LastNotifiedFailures int            `json:"last_notified_failures,omitempty"`
+	ConsecutiveFailures  int `json:"consecutive_failures"`
+	LastNotifiedFailures int `json:"last_notified_failures,omitempty"`
 	// LastNotifiedAt 是最近一次「失败通知」真正送达的时间。
 	//
 	// 只记次数无法回答「群里那条坏了是不是已经该收尾了」：开关关闭期间先恢复、
 	// 随后又失败时，ConsecutiveFailures 已经不为零，但上一次通告的故障其实被那次
 	// 成功终止过。用它与 LastSuccessAt 比较，补报才知道该先还一笔恢复通知。
-	LastNotifiedAt *time.Time `json:"last_notified_at,omitempty"`
-	WindowDays           int            `json:"window_days,omitempty"`
-	Total                int            `json:"total"`
-	Reasons              map[string]int `json:"reasons,omitempty"`
-	DurationMS           int64          `json:"duration_ms,omitempty"`
+	LastNotifiedAt *time.Time     `json:"last_notified_at,omitempty"`
+	WindowDays     int            `json:"window_days,omitempty"`
+	Total          int            `json:"total"`
+	Reasons        map[string]int `json:"reasons,omitempty"`
+	DurationMS     int64          `json:"duration_ms,omitempty"`
 }
 
 // Ready 表示可以可信地用排除名单圈人。从未成功刷新过时必须 fail closed。

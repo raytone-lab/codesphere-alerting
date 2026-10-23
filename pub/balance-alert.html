@@ -56,8 +56,11 @@
       flex: 0 0 auto;
       min-height: 20px;
     }
-    .summary { margin: 0; color: var(--navy-muted); font-size: 13px; min-width: 0; }
+    .summary { margin: 0; color: var(--navy-muted); font-size: 13px; line-height: 1.9; min-width: 0; }
     .summary b { color: var(--navy-900); }
+    /* 摘要分两行：业务参数一行，绑定关系（数据源/规则）另起一行。
+       用块级断行而不是靠宽度自然折行，窗口宽窄都不会把「数据源」挤到可疑的位置。 */
+    .summary .summary-line { display: block; }
     .msg { margin: 0; font-size: 13px; flex: 0 1 auto; text-align: right; white-space: nowrap; }
     .msg p { margin: 0; }
     .msg .ok { color: #1f7a4d; }
@@ -711,9 +714,9 @@
         " · 充值比例 <b>" + String(s.last_recharge_pct || 5) + "%</b>" +
         " · 紧急重复 <b>" + String(s.critical_repeat_days || 3) + "</b> 天" +
         " · 授信窗口 <b>" + String(s.credit_advance_window_days || 90) + "</b> 天" +
-        " · 数据源 <b>" + esc(datasourceLabel(s.datasource_id)) + "</b>" +
+        '<span class="summary-line">' + "数据源 <b>" + esc(datasourceLabel(s.datasource_id)) + "</b>" +
         " · 试点规则 <b>" + esc(notifyRuleLabel(s.pilot_notify_rule_id)) + "</b>" +
-        " · 客户规则 <b>" + esc(notifyRuleLabel(s.customer_notify_rule_id)) + "</b>";
+        " · 客户规则 <b>" + esc(notifyRuleLabel(s.customer_notify_rule_id)) + "</b></span>";
     }
     function fillForm(s) {
       const on = s.enabled !== false;

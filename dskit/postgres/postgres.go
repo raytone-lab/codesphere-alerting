@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -123,8 +122,8 @@ func (p *PostgreSQL) NewConn(ctx context.Context, database string) (*gorm.DB, er
 	}()
 
 	// 本机 Postgres 通常不启 TLS；远端（RDS）仍默认 require。地址上的 ?sslmode= 优先。
-	sslmode := sslModeForAddr(p.Shard.Addr, host)
-	dsn := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=%s&TimeZone=Asia/Shanghai", url.QueryEscape(p.Shard.User), url.QueryEscape(p.Shard.Password), host, database, sslmode)
+	// connect_timeout 一并下发：它管的是建连，不受调用方 ctx deadline 约束。
+	dsn := buildConnDSN(p.Shard, host, database, connectTimeoutForAddr(p.Shard.Addr, p.Shard.Timeout))
 
 	db, err = sqlbase.NewDB(
 		ctx,

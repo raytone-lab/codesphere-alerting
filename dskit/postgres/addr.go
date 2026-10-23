@@ -1,6 +1,11 @@
 package postgres
 
-import "strings"
+import (
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+)
 
 // SplitHostDatabase splits a PostgreSQL address into host:port and database.
 // The datasource form has no separate database field, so users commonly put
@@ -78,4 +83,39 @@ func sslModeForAddr(addr, host string) string {
 	default:
 		return "require"
 	}
+}
+
+// connectTimeoutForAddr 返回建连超时的秒数。
+//
+// 地址上显式写的 ?connect_timeout= 优先（与 sslModeForAddr 的约定一致），否则用
+// 数据源自带的 pgsql.timeout（NewConn 已把 0 兜底成 60）。
+//
+// 这个值只作用于「拨号 + 启动握手」这一步，和查询超时是两码事：pgx 与 lib/pq 都在
+// ctx 之外发起拨号，所以 ctx 的 deadline 管不到建连。少了它，对方主机被防火墙
+// DROP 时只能等操作系统的 SYN 重试（Linux 约 127 秒），比整条刷新链路的查询预算
+// 还长，而且这段时间连错误都报不出来。
+func connectTimeoutForAddr(addr string, fallback int) int {
+	raw := strings.TrimSpace(addr)
+	if q := strings.Index(raw, "?"); q >= 0 {
+		for _, part := range strings.Split(raw[q+1:], "&") {
+			value, ok := strings.CutPrefix(part, "connect_timeout=")
+			if !ok {
+				continue
+			}
+			if n, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && n > 0 {
+				return n
+			}
+		}
+	}
+	return fallback
+}
+
+// buildConnDSN 组装 pgsql 连接串。connect_timeout 必须显式下发，见上。
+func buildConnDSN(shard Shard, host, database string, connectTimeout int) string {
+	dsn := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=%s&TimeZone=Asia/Shanghai",
+		url.QueryEscape(shard.User), url.QueryEscape(shard.Password), host, database, sslModeForAddr(shard.Addr, host))
+	if connectTimeout > 0 {
+		dsn += fmt.Sprintf("&connect_timeout=%d", connectTimeout)
+	}
+	return dsn
 }

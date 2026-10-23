@@ -298,10 +298,17 @@ func TestNotifyPendingExcludeOpsStaysSilentWhileOngoing(t *testing.T) {
 }
 
 func TestBillingCtxCarriesDeadline(t *testing.T) {
+	start := time.Now()
 	ctx, cancel := billingCtx(context.Background())
 	defer cancel()
-	if _, ok := ctx.Deadline(); !ok {
+	dl, ok := ctx.Deadline()
+	if !ok {
 		t.Fatal("cross-db billing queries must carry a deadline")
+	}
+	// PRD FR-04 写的是「单次限时 60s」，不是「有个 deadline 就行」：慢查询挂住
+	// 刷新任务会一起堵死 runMu 与手动刷新，所以这个数值本身要被钉住。
+	if got := dl.Sub(start); got < 59*time.Second || got > 61*time.Second {
+		t.Fatalf("PRD FR-04 caps the billing query at 60s, got %s (constant=%s)", got, billingQueryTimeout)
 	}
 
 	// 调用方传 nil 也不能 panic：后台任务里 std 可能没被赋值。

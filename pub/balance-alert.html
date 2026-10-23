@@ -16,6 +16,10 @@
       --paper: #f7f5f1;
       --surface: #fffefb;
       --surface-warm: #faf6ee;
+      /* 页头三行（说明 / 摘要第一行 / 摘要第二行）共用同一条文字节奏：
+         同字号、同行高、块与块之间零外边距。任一处单独改，第 1↔2 行就会与
+         第 2↔3 行不等距——这正是之前两个块各写一套 line-height 造成的偏差。 */
+      --lede-line: 1.9;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -41,11 +45,12 @@
       align-items: flex-start;
       justify-content: space-between;
       gap: 16px;
-      margin-bottom: 8px;
+      /* 不留下外边距：行距完全由 --lede-line 决定，块间再补 margin 就会多出一段。 */
+      margin: 0;
       flex: 0 0 auto;
     }
     .hero h1 { margin: 0 0 6px; font-size: 22px; font-weight: 650; }
-    .hero p { margin: 0; color: var(--navy-muted); font-size: 13px; line-height: 1.6; max-width: 640px; }
+    .hero p { margin: 0; color: var(--navy-muted); font-size: 13px; line-height: var(--lede-line); max-width: 640px; }
     .hero-actions { display: flex; gap: 8px; flex-shrink: 0; }
     .status-row {
       display: flex;
@@ -56,7 +61,7 @@
       flex: 0 0 auto;
       min-height: 20px;
     }
-    .summary { margin: 0; color: var(--navy-muted); font-size: 13px; line-height: 1.9; min-width: 0; }
+    .summary { margin: 0; color: var(--navy-muted); font-size: 13px; line-height: var(--lede-line); min-width: 0; }
     .summary b { color: var(--navy-900); }
     /* 摘要分两行：业务参数一行，绑定关系（数据源/规则）另起一行。
        用块级断行而不是靠宽度自然折行，窗口宽窄都不会把「数据源」挤到可疑的位置。 */

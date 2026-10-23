@@ -254,6 +254,30 @@ func scanExcludes(t *testing.T, db *gorm.DB, windowDays int) map[string]string {
 	return out
 }
 
+// scanHits 与扫描走同一条 SQL 路径，只把外层的 CASE 换成 bool_or。
+func scanHits(t *testing.T, db *gorm.DB, windowDays int) map[string]CreditExcludeHits {
+	t.Helper()
+	rows, err := db.Raw(excludeHitsSQL, windowDays, windowDays).Rows()
+	if err != nil {
+		t.Fatalf("run excludeHitsSQL: %v", err)
+	}
+	defer rows.Close()
+
+	out := map[string]CreditExcludeHits{}
+	for rows.Next() {
+		var id string
+		var h CreditExcludeHits
+		if err := rows.Scan(&id, &h.OpenDebt, &h.RecentAdvance, &h.RecentSettlement); err != nil {
+			t.Fatalf("scan hits row: %v", err)
+		}
+		out[id] = h
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate hits rows: %v", err)
+	}
+	return out
+}
+
 // TestExcludeScanAgainstPostgres 覆盖 TC-01~TC-09 与 TC-14 的判定口径。
 func TestExcludeScanAgainstPostgres(t *testing.T) {
 	db := pgTestDB(t)
@@ -327,6 +351,78 @@ func TestExcludeScanAgainstPostgres(t *testing.T) {
 		if reason, ok := got[id]; ok {
 			t.Errorf("%s must not be excluded, got reason=%q", id, reason)
 		}
+	}
+}
+
+// TestExcludeHitsAgreeWithScan 锁定「明细页的逐条命中」与「刷新的主因」同源。
+//
+// 两者共用 excludeActivitySQL，但外层查询不同：一个有 CASE，一个有 bool_or。
+// 这条用例是唯一能证明它们没有漂的地方——顺带也证明了下列容易读错的事实：
+// 一家企业可以同时命中多条，reason 只反映最高的一条，所以
+// 「核销计数为 0」绝不代表核销条件没被命中。
+func TestExcludeHitsAgreeWithScan(t *testing.T) {
+	db := pgTestDB(t)
+	const window = 90
+
+	// 三条全中：既有未清债务、窗口内又有新垫付、窗口内还有核销。
+	account(t, db, "all3", "enterprise", "active", false)
+	advance(t, db, "all3", 100, 10, 5)
+	settlement(t, db, "all3", "ENTERPRISE_CREDIT", 5)
+
+	// 只命中核销：最后垫付超窗，但 20 天前对账代充过（TC-14 形态）。
+	account(t, db, "only_settle", "enterprise", "active", false)
+	advance(t, db, "only_settle", 80, 80, 180)
+	settlement(t, db, "only_settle", "ENTERPRISE_CREDIT", 20)
+
+	// 只命中未清债务：垫付在窗口外、从未核销。
+	account(t, db, "only_debt", "enterprise", "active", false)
+	advance(t, db, "only_debt", 100, 40, 200)
+
+	// 什么都不命中：只有非信用核销。
+	account(t, db, "none", "enterprise", "active", false)
+	settlement(t, db, "none", "NEGATIVE_BALANCE", 5)
+
+	scan := scanExcludes(t, db, window)
+	hits := scanHits(t, db, window)
+
+	// 1) 两边覆盖的账户集合必须完全一致（都是「至少命中一条」的账户）。
+	for id := range scan {
+		if _, ok := hits[id]; !ok {
+			t.Errorf("%s is excluded but has no hits row", id)
+		}
+	}
+	for id := range hits {
+		if _, ok := scan[id]; !ok {
+			t.Errorf("%s has hits but is not excluded", id)
+		}
+	}
+
+	wantHits := map[string]CreditExcludeHits{
+		"all3":        {OpenDebt: true, RecentAdvance: true, RecentSettlement: true},
+		"only_settle": {RecentSettlement: true},
+		"only_debt":   {OpenDebt: true},
+	}
+	for id, want := range wantHits {
+		if hits[id] != want {
+			t.Errorf("%s: hits=%+v, want %+v", id, hits[id], want)
+		}
+	}
+	if _, ok := hits["none"]; ok {
+		t.Errorf("non-credit settlement must not count as a hit: %+v", hits["none"])
+	}
+
+	// 2) reason 必须是「命中集合里优先级最高的那一条」，而不是随便取一个。
+	if reason := scan["all3"]; reason != models.ExcludeReasonOpenDebt {
+		t.Errorf("all3 reason=%q, want OPEN_DEBT (highest of three hits)", reason)
+	}
+	if reason := scan["only_settle"]; reason != models.ExcludeReasonRecentSettlement {
+		t.Errorf("only_settle reason=%q, want RECENT_SETTLEMENT", reason)
+	}
+
+	// 3) all3 同时命中了核销，但 reason 不是它：这条断言记录的就是那个
+	//    「reason 分布看不出核销条件是否生效」的坑，防止有人据此删掉第三段。
+	if !hits["all3"].RecentSettlement {
+		t.Error("all3 must hit RECENT_SETTLEMENT even though reason says OPEN_DEBT")
 	}
 }
 

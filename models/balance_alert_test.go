@@ -233,6 +233,57 @@ func TestBalanceAlertCreditExcludeHas(t *testing.T) {
 	}
 }
 
+// TestBalanceAlertCreditExcludeGets 锁定明细接口的排序与上限。
+//
+// 排序按账户 ID 而不是 reason：优先级顺序只在页面那份 EXCLUDE_REASON 常量里定义，
+// 这里再写一遍 CASE 就会有两份口径。这条用例防止有人为了「让 OPEN_DEBT 排前面」
+// 在模型层加一段隐式排序。
+func TestBalanceAlertCreditExcludeGets(t *testing.T) {
+	c := testBalanceAlertCtx(t)
+	at := time.Date(2026, 10, 23, 7, 30, 0, 0, time.Local)
+	if err := BalanceAlertCreditExcludeReplace(c, []BalanceAlertCreditExclude{
+		{BillingAccountID: "c", Reason: ExcludeReasonRecentSettlement, RefreshedAt: at},
+		{BillingAccountID: "a", Reason: ExcludeReasonOpenDebt, RefreshedAt: at},
+		{BillingAccountID: "b", Reason: ExcludeReasonRecentAdvance, RefreshedAt: at},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := BalanceAlertCreditExcludeGets(c, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 rows, got %d", len(got))
+	}
+	for i, want := range []string{"a", "b", "c"} {
+		if got[i].BillingAccountID != want {
+			t.Fatalf("row %d = %q, want %q (order must follow billing_account_id)", i, got[i].BillingAccountID, want)
+		}
+		if got[i].RefreshedAt.IsZero() {
+			t.Fatalf("row %q lost refreshed_at", got[i].BillingAccountID)
+		}
+	}
+
+	// limit 必须真的收窄，而不是被当成「0 就是全部」后静默忽略。
+	got, err = BalanceAlertCreditExcludeGets(c, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("limit=2 must return 2 rows, got %d", len(got))
+	}
+
+	// 越界 limit 收敛到上限而不是不返回，避免页面传错一个数就得到空表。
+	got, err = BalanceAlertCreditExcludeGets(c, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("negative limit must fall back to the cap, got %d rows", len(got))
+	}
+}
+
 func TestBalanceAlertConfigAndRecord(t *testing.T) {
 	c := testBalanceAlertCtx(t)
 	missing, err := BalanceAlertConfigGet(c, "acct-1")

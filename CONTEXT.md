@@ -61,6 +61,7 @@
 | Q10 | 刷新状态新增 `last_notified_failures`（已通知到第几次失败）与 `last_notified_at`（该次通知送达时间） | 只有显式计数能区分"已通知"与"通知没发出去"；但要判断"群里那条坏了是否该收尾"，还需要通告时间与 `last_success_at` 比大小。只记次数会让"关闭期间恢复、随后又失败"两份消息一起丢 |
 | Q15 | 「从未成功」的告警**只由定时任务发出**；手动刷新只在页面回显错误 | 点按钮的人就在页面上，再推钉钉是重复告知；钉钉留给没人盯着的场景 |
 | Q8 / Q17 | `list_total` **只进 `exclude-state`**，不进判定 `Stats` | 判定轮次的职责是圈人，不该为日志多读一次配置；页面本就同时拉两个接口，拼接成本为零 |
+| Q21 | 建连超时（`connect_timeout`）落到 DSN 上，取数据源的 `pgsql.timeout`，地址里的 `?connect_timeout=` 优先 | 这个字段以前只存不生效：`NewConn` 把它兜底成 60 却从没写进连接串。ctx 的 deadline 管不到拨号，对方被防火墙 DROP 时只能等操作系统 SYN 重试（Linux 约 127s），比整条刷新的查询预算还长 |
 
 ### 3.3 参数与可观测
 
@@ -126,7 +127,7 @@
 
 ```bash
 # 单测（不需要真库）
-go test ./balancealert/ ./models/
+go test ./balancealert/ ./models/ ./dskit/postgres/
 
 # 真库集成测试（TC-01 ~ TC-14）
 # -run TestExclude 是刻意的：所有真库用例都以 TestExclude 开头，
@@ -135,14 +136,40 @@ $env:BALANCEALERT_PG_DSN = "host=127.0.0.1 port=5432 user=... dbname=ruidong_bil
 go test ./balancealert/ -count=1 -run TestExclude -v
 
 # 刷新与状态
-curl -X POST -H "Authorization: Bearer $TOKEN" localhost:17000/api/n9e/balance-alert/exclude-refresh
-curl -H "Authorization: Bearer $TOKEN" localhost:17000/api/n9e/balance-alert/exclude-state
+# 固定 token 走 X-User-Token；Authorization: Bearer 只认登录发的 JWT，用固定 token 会 401。
+curl -X POST -H "X-User-Token: $TOKEN" localhost:17000/api/n9e/balance-alert/exclude-refresh
+curl -H "X-User-Token: $TOKEN" localhost:17000/api/n9e/balance-alert/exclude-state
 
 # 圈选与排除数
-curl -X POST -H "Authorization: Bearer $TOKEN" localhost:17000/api/n9e/balance-alert/run
+curl -X POST -H "X-User-Token: $TOKEN" localhost:17000/api/n9e/balance-alert/run
+
+# 覆盖率（2026-10-23：balancealert 44.2% → 53.2%，
+# exclude.go 28.3% → 84.8%，cron.go 0% → 18.5%）
+go test ./balancealert/ -count=1 -cover
 ```
 
+`RefreshCreditExcludes` 的「读计费库」一步是包级变量 `scanCreditExcludes`（默认
+`scanBillingCreditExcludes`），**只为测试可替换**，生产路径逐字不变。抽出来的理由是
+链路其余部分（失败计数、告警去重与恢复清账、状态落库、名单整份替换）全是 alerting
+自己的状态机，却因为第一步要连真实 datasource 而整条链路都跑不进单测；这些规则一旦
+写错就是静默误报或永久静默。`exclude_refresh_test.go` 用 sqlite + webhook 替身把整条
+链路跑完（成功换名单、第 2 次失败才喊人、手动刷新不推进计数、恢复清账、状态不可读时
+拒绝整份回写）。它不是配置项、不读环境变量，替换需串行（包内测试没有 `t.Parallel`）。
+
+`cron_test.go` 用同样方式锁住 `cron.go` 里四条只有上线才看得见的约束：刷新绑的是
+Asia/Shanghai 的 07:30（用例先把 `time.Local` 顶成 UTC，删掉
+`cron.WithLocation` 立刻变红，而不是在本机 +08 时区下假通过）；启动补刷同步且早于
+cron 注册（把「注册调度器」换成可观察的替身 `startCronJobs`，记录器在被调用时读库，
+补刷一旦改回 goroutine 或挪到注册之后就会看到空名单）；已有成功名单时重启不再打
+计费库；补刷失败仍照常注册调度。四条都做过反向验证：删时区、调换两句顺序、去掉
+ready 早退、把 CRON 改成 MANUAL，各自都会让对应用例失败。
+
+`cron.go` 剩余未覆盖的是三个任务体（每 15 分钟判定 / 每日动态 / 漏报巡检）里
+「调用 runner + 打印统计」的那几行，本身只是对已测试函数的转发与日志。
+
 2026-10-22 的实测基线：名单 4 家（`OPEN_DEBT` 1 / `RECENT_ADVANCE` 3），判定轮次 `excluded=4, prepaid=6, skipped_income=1`；cron 在 11:00、11:15 均按时触发且结果一致。
+
+2026-10-23 验收复跑：以 12 个 `ba_qa_*` 账户覆盖 TC-01 ~ TC-14 真库全场景，刷新后名单 9 家（`OPEN_DEBT` 3 / `RECENT_ADVANCE` 5 / `RECENT_SETTLEMENT` 1），逐户核对 reason 与窗口（30/90/365）行为均符合 PRD；`exclude_blocked`、失败沿用旧名单、第 2 次告警、恢复补报、启动补刷早于 cron 注册均在真实进程上验证，验收数据已清理回基线。
 
 ---
 

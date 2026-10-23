@@ -40,6 +40,14 @@ func (f fakeStore) ScanCreditExcludes(ctx context.Context, windowDays int) (map[
 	return nil, f.err
 }
 
+func (f fakeStore) ScanCreditExcludeHits(ctx context.Context, windowDays int) (map[string]CreditExcludeHits, error) {
+	return map[string]CreditExcludeHits{}, f.err
+}
+
+func (f fakeStore) ListAccountBriefs(ctx context.Context, ids []string) (map[string]AccountBrief, error) {
+	return map[string]AccountBrief{}, f.err
+}
+
 func testRunnerCtx(t *testing.T) *ctx.Context {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})

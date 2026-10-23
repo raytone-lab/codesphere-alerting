@@ -170,6 +170,10 @@ type Store interface {
 	ListBillingUsers(ctx context.Context) ([]BillingUser, error)
 	// ScanCreditExcludes 返回「账户 -> 排除主因」，只读计费库，供每日物化名单使用。
 	ScanCreditExcludes(ctx context.Context, windowDays int) (map[string]string, error)
+	// ScanCreditExcludeHits 返回「账户 -> 三条条件的命中情况」，只供运营页诊断。
+	ScanCreditExcludeHits(ctx context.Context, windowDays int) (map[string]CreditExcludeHits, error)
+	// ListAccountBriefs 按账户 ID 取身份与状态，只用于运营页给人看名字。
+	ListAccountBriefs(ctx context.Context, ids []string) (map[string]AccountBrief, error)
 }
 
 type PGStore struct {
@@ -282,6 +286,151 @@ func (s *PGStore) ListBillingUsers(ctx context.Context) ([]BillingUser, error) {
 		out = append(out, u)
 	}
 	return out, rows.Err()
+}
+
+// AccountBriefSelectSQL 按 ID 取账户身份，只服务运营页的名单明细。
+//
+// 刻意**不加**候选集过滤（type/status/deleted_at/隔离）：名单本身不按账户状态过滤，
+// 所以名单里可能留着已暂停、已删除或半开通隔离的账户。把这些账户的真实状态显示出来，
+// 才能解释「名单 400 家、本轮只排除 12 家」——若在这里过滤掉，页面就只剩下一份
+// 与名单行数对不上的明细。
+const AccountBriefSelectSQL = `
+SELECT a.id,
+       COALESCE(NULLIF(a.enterprise_name, ''), a.name, a.id) AS name,
+       COALESCE(a.type, '') AS type,
+       COALESCE(a.status, '') AS status,
+       (a.deleted_at IS NOT NULL) AS deleted,
+       (a.provisioning_quarantined_at IS NOT NULL) AS quarantined
+FROM billing_accounts a
+WHERE a.id IN (%s)
+`
+
+// AccountBrief 是运营页展示的账户身份，不含余额与任何金额。
+type AccountBrief struct {
+	ID          string
+	Name        string
+	Type        string
+	Status      string
+	Deleted     bool
+	Quarantined bool
+}
+
+// accountBriefChunk 是单条 SQL 的 IN 参数上限。
+//
+// 与名单整份替换用的 CreateInBatches(500) 保持同一量级：PostgreSQL 的绑定参数上限
+// 是 65535，500 既远低于上限，也让每条语句的执行计划足够简单。
+const accountBriefChunk = 500
+
+// ListAccountBriefs 批量取账户身份。返回 map 而不是切片：调用方按名单里的 ID 取，
+// 查不到的账户（计费库已无此记录）自然缺席，由调用方决定怎么展示。
+func (s *PGStore) ListAccountBriefs(ctx context.Context, ids []string) (map[string]AccountBrief, error) {
+	out := make(map[string]AccountBrief, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	ctx, cancel := billingCtx(ctx)
+	defer cancel()
+
+	for start := 0; start < len(ids); start += accountBriefChunk {
+		end := start + accountBriefChunk
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+		marks := make([]string, 0, len(batch))
+		args := make([]interface{}, 0, len(batch))
+		for _, id := range batch {
+			marks = append(marks, "?")
+			args = append(args, id)
+		}
+
+		rows, err := s.db.WithContext(ctx).
+			Raw(fmt.Sprintf(AccountBriefSelectSQL, strings.Join(marks, ",")), args...).Rows()
+		if err != nil {
+			return nil, wrapBillingSelectErr(err)
+		}
+		for rows.Next() {
+			var b AccountBrief
+			if err := rows.Scan(&b.ID, &b.Name, &b.Type, &b.Status, &b.Deleted, &b.Quarantined); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if b.ID != "" {
+				out[b.ID] = b
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// LookupAccountBriefs 是名单明细的「补名字」一步，对页面是**尽力而为**的：
+//
+// 明细页的骨架来自 alerting 自己的库，计费库只用来补企业名与账户状态。计费库不可达
+// 时应当仍然能看到「谁被排除、主因是什么」，因此这里把错误原样交给调用方去展示成
+// 一句提示，而不是让整个接口失败。
+func LookupAccountBriefs(n9e *ctx.Context, settings models.BalanceAlertSettings, ids []string) (map[string]AccountBrief, error) {
+	store, err := OpenStore(n9e, settings)
+	if err != nil {
+		return nil, err
+	}
+	return store.ListAccountBriefs(context.Background(), ids)
+}
+
+// CreditExcludeHits 是某个账户对三条排除条件的命中情况，只用于运营诊断。
+//
+// 与物化表里的 reason 是两个层次：reason 是「按优先级选出的一个主因」，Hits 是
+// 「三条各自是否成立」。一家企业可以同时命中三条，reason 只反映其中最高的那条。
+type CreditExcludeHits struct {
+	OpenDebt         bool
+	RecentAdvance    bool
+	RecentSettlement bool
+}
+
+// Any 表示至少命中一条；三条皆假说明该账户在当前数据下已不该被排除。
+func (h CreditExcludeHits) Any() bool {
+	return h.OpenDebt || h.RecentAdvance || h.RecentSettlement
+}
+
+// ScanCreditExcludeHits 按当前计费库数据重算三条条件的命中情况。
+//
+// 与刷新共用 excludeActivitySQL，所以口径不会漂。返回值只含命中至少一条的账户：
+// 名单里查不到的账户即「当下已不该排除」，由调用方展示成空命中。
+func (s *PGStore) ScanCreditExcludeHits(ctx context.Context, windowDays int) (map[string]CreditExcludeHits, error) {
+	ctx, cancel := billingCtx(ctx)
+	defer cancel()
+	rows, err := s.db.WithContext(ctx).Raw(excludeHitsSQL, windowDays, windowDays).Rows()
+	if err != nil {
+		return nil, wrapBillingSelectErr(err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]CreditExcludeHits)
+	for rows.Next() {
+		var id string
+		var h CreditExcludeHits
+		if err := rows.Scan(&id, &h.OpenDebt, &h.RecentAdvance, &h.RecentSettlement); err != nil {
+			return nil, err
+		}
+		if id != "" {
+			out[id] = h
+		}
+	}
+	return out, rows.Err()
+}
+
+// LookupCreditExcludeHits 与 LookupAccountBriefs 同样是「尽力而为」：命中标记只是
+// 附加解释，拿不到时名单明细本身仍然要能打开。
+func LookupCreditExcludeHits(n9e *ctx.Context, settings models.BalanceAlertSettings, windowDays int) (map[string]CreditExcludeHits, error) {
+	store, err := OpenStore(n9e, settings)
+	if err != nil {
+		return nil, err
+	}
+	return store.ScanCreditExcludeHits(context.Background(), windowDays)
 }
 
 // ScanCreditExcludes 只读计费库：每日一次聚合，算出授信活跃账户与其主因。

@@ -97,6 +97,29 @@ func BalanceAlertCreditExcludeReplace(ctx *ctx.Context, rows []BalanceAlertCredi
 	})
 }
 
+// MaxBalanceAlertCreditExcludeList 是名单明细单次返回的上限。
+//
+// 名单是物化缓存，正常规模是几百到几千行（授信活跃企业中未清债务的部分）。
+// 设上限只为防一次响应过大拖垮浏览器：超过时接口回 truncated=true，页面显式
+// 告知「只显示了前 N 条」，而不是静默截断后让人误以为名单就这么多。
+const MaxBalanceAlertCreditExcludeList = 2000
+
+// BalanceAlertCreditExcludeGets 返回名单明细，供运营页展示「谁被排除、主因是什么」。
+//
+// 按账户 ID 排序而不是按 reason 优先级：优先级顺序由页面那份常量（EXCLUDE_REASON
+// 的键序）决定，在本层再写一遍 CASE 会让同一套口径同时存在两处，改一处就会漂。
+func BalanceAlertCreditExcludeGets(ctx *ctx.Context, limit int) ([]BalanceAlertCreditExclude, error) {
+	if limit <= 0 || limit > MaxBalanceAlertCreditExcludeList {
+		limit = MaxBalanceAlertCreditExcludeList
+	}
+	var out []BalanceAlertCreditExclude
+	err := DB(ctx).Model(&BalanceAlertCreditExclude{}).
+		Order("billing_account_id").
+		Limit(limit).
+		Find(&out).Error
+	return out, err
+}
+
 func BalanceAlertCreditExcludeReasonCounts(ctx *ctx.Context) (map[string]int, int, error) {
 	var out []struct {
 		Reason string

@@ -29,22 +29,14 @@ var excludeMu sync.Mutex
 // 15 分钟判定轮次只读 alerting 库的名单，再用内存集合过滤，因此既不回扫
 // balance_consumption_allocations（G4），也不跨库 join。
 
-// excludeScanSQL 在计费库执行：一次算出三类命中并按 OPEN_DEBT > RECENT_ADVANCE >
-// RECENT_SETTLEMENT 取主因。窗口为滚动 N×24 小时，不按自然日截断。
+// excludeActivitySQL 是「一笔分摊/一次核销给某个账户打了什么标记」的原始事实。
 //
-// 三段条件是**互相独立的排除条件**，不是彼此的冗余校验。尤其是 settlements 那一段：
-// 企业可能在最后一次垫付超窗之后才做对账代充（信用核销），此时垫付条件不命中，
-// 但它当下仍按信用账期结算、并会在窗口内继续产生新垫付。删掉这一段会让刚结清账的
-// 企业立刻回到预警池、收到误报。因此排除期的起算点是「最后一次垫付或最后一次核销
-// 中较晚者」，实际排除期可能长于「最后垫付 + N 天」。见 ADR 0002 与 TC-14。
-const excludeScanSQL = `
-SELECT account_id,
-       CASE
-         WHEN bool_or(open_debt) THEN '` + models.ExcludeReasonOpenDebt + `'
-         WHEN bool_or(recent_advance) THEN '` + models.ExcludeReasonRecentAdvance + `'
-         ELSE '` + models.ExcludeReasonRecentSettlement + `'
-       END AS reason
-FROM (
+// 单独抽出来是因为它现在有两个消费者：刷新（取主因）与名单明细页（逐条命中标记）。
+// 两者必须是同一套口径——明细页的作用就是向运营证明「名单是这么判出来的」，如果
+// 它抄一份自己的 SQL，改了刷新漏改明细，页面就会开始骗人。
+//
+// 两处 `?` 都是窗口天数。三段条件的语义与独立性见 excludeScanSQL 的说明。
+const excludeActivitySQL = `
   SELECT al.billing_account_id AS account_id,
          (al.approved_credit_usd - COALESCE(al.settled_usd, 0) > 0.0001) AS open_debt,
          (al.approved_credit_usd > 0
@@ -62,9 +54,44 @@ FROM (
   -- 核销，不限定会把 TC-05 类企业误排最多一个窗口。
   WHERE s.debt_source = 'ENTERPRISE_CREDIT'
     AND s.occurred_at > now() - make_interval(days => ?::int)
-) activity
+`
+
+// excludeScanSQL 在计费库执行：一次算出三类命中并按 OPEN_DEBT > RECENT_ADVANCE >
+// RECENT_SETTLEMENT 取主因。窗口为滚动 N×24 小时，不按自然日截断。
+//
+// 三段条件是**互相独立的排除条件**，不是彼此的冗余校验。尤其是 settlements 那一段：
+// 企业可能在最后一次垫付超窗之后才做对账代充（信用核销），此时垫付条件不命中，
+// 但它当下仍按信用账期结算、并会在窗口内继续产生新垫付。删掉这一段会让刚结清账的
+// 企业立刻回到预警池、收到误报。因此排除期的起算点是「最后一次垫付或最后一次核销
+// 中较晚者」，实际排除期可能长于「最后垫付 + N 天」。见 ADR 0002 与 TC-14。
+const excludeScanSQL = `
+SELECT account_id,
+       CASE
+         WHEN bool_or(open_debt) THEN '` + models.ExcludeReasonOpenDebt + `'
+         WHEN bool_or(recent_advance) THEN '` + models.ExcludeReasonRecentAdvance + `'
+         ELSE '` + models.ExcludeReasonRecentSettlement + `'
+       END AS reason
+FROM (` + excludeActivitySQL + `) activity
 -- 只有 unapproved_debt 的行两标记皆假，必须过滤；否则 ELSE 分支会把它们
 -- 标成 RECENT_SETTLEMENT 并误排除。
+WHERE activity.open_debt OR activity.recent_advance OR activity.recent_settlement
+GROUP BY account_id
+`
+
+// excludeHitsSQL 与 excludeScanSQL 同源，只是把三个 bool 原样返回，供名单明细页
+// 展示「这家到底命中了哪几条」。物化表只存主因，这一信息在 alerting 库里没有，
+// 只能回到计费库重算。
+//
+// 代价与刷新完全相同（同一条部分索引扫描、几十毫秒内），但它是**实时**重算，
+// 可能与上一份名单不一致：名单每天只刷新一次，其间新增/结清的账目会让某个账户的
+// 命中情况变化。这个不一致本身是有用的诊断信号（「它已经不该在名单里了」），
+// 所以绝不能把它当成「名单错了」的断言展示，页面必须标明「按当前计费库重算」。
+const excludeHitsSQL = `
+SELECT account_id,
+       bool_or(open_debt) AS open_debt,
+       bool_or(recent_advance) AS recent_advance,
+       bool_or(recent_settlement) AS recent_settlement
+FROM (` + excludeActivitySQL + `) activity
 WHERE activity.open_debt OR activity.recent_advance OR activity.recent_settlement
 GROUP BY account_id
 `
@@ -99,6 +126,19 @@ func scanBillingCreditExcludes(n9e *ctx.Context, settings models.BalanceAlertSet
 	return store.ScanCreditExcludes(context.Background(), windowDays)
 }
 
+// scanCreditExcludes 是 RefreshCreditExcludes 中「读计费库」这一步，默认实现就是
+// scanBillingCreditExcludes。
+//
+// 抽成可替换的包级变量只为一个原因：刷新链路的其余部分（失败计数、告警去重与恢复
+// 清账、状态落库、名单整份替换）全部是 alerting 自己的状态机，与计费库无关，却因为
+// 第一步要连真实 datasource 而整条链路都跑不进单测。结果是「连续失败第 2 次才喊人」
+// 「手动刷新不推进计数」「状态读不出时绝不整份回写」这些最容易写错的规则长期只有
+// 人工验证、语句覆盖率为 0 —— 而它们恰恰是会静默制造误报或永久静默的地方。
+//
+// 它不是配置项、不读环境变量，生产路径逐字不变；只允许测试替换。替换需串行：
+// 包内测试没有 t.Parallel，与 runMu / excludeMu 的约定一致。
+var scanCreditExcludes = scanBillingCreditExcludes
+
 // RefreshCreditExcludes 是全量刷新的唯一入口：cron、启动补刷与参数页手动刷新都走它，
 // 这样失败计数、日志和运营告警只有一处实现。
 func RefreshCreditExcludes(n9e *ctx.Context, trigger RefreshTrigger) (ExcludeRefreshResult, error) {
@@ -116,7 +156,7 @@ func RefreshCreditExcludes(n9e *ctx.Context, trigger RefreshTrigger) (ExcludeRef
 	started := time.Now()
 
 	refreshErr := func() error {
-		found, err := scanBillingCreditExcludes(n9e, settings, window)
+		found, err := scanCreditExcludes(n9e, settings, window)
 		if err != nil {
 			return err
 		}

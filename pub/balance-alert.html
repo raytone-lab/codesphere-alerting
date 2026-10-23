@@ -48,10 +48,23 @@
       /* 不留下外边距：行距完全由 --lede-line 决定，块间再补 margin 就会多出一段。 */
       margin: 0;
       flex: 0 0 auto;
+      flex-wrap: wrap;
     }
     .hero h1 { margin: 0 0 6px; font-size: 22px; font-weight: 650; }
     .hero p { margin: 0; color: var(--navy-muted); font-size: 13px; line-height: var(--lede-line); max-width: 640px; }
-    .hero-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    /* 给标题块一个下限：再窄就整组按钮折到下一行贴右，
+       而不是把这段说明压成每行两三个字的竖条。 */
+    .hero-copy { flex: 1 1 420px; min-width: 320px; }
+    /* margin-left:auto 让按钮组在折行后仍然贴右，而不是掉到下一行左侧。 */
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+      margin-left: auto;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
     .status-row {
       display: flex;
       align-items: center;
@@ -106,10 +119,42 @@
     .row .k { padding-top: 8px; color: var(--navy-muted); font-size: 13px; font-weight: 600; }
     .row .v { min-width: 0; }
     .row .note { margin: 6px 0 0; color: var(--navy-faint); font-size: 12px; line-height: 1.5; }
-    .exclude-state { margin: 0 0 8px; font-size: 13px; line-height: 1.6; color: var(--navy-muted); }
+    /* 授信排除名单状态条：从参数设置弹窗移到主界面上，紧跟摘要行。
+       做成一条独立状态带（浅底 + 边框），不与上面三行正文混排——否则页头会变成
+       第四行等宽文字，读起来分不清哪行是「参数」、哪行是「任务健康度」。 */
+    .exclude-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 6px 16px;
+      margin: 0 0 12px;
+      padding: 8px 12px;
+      background: var(--surface-warm);
+      border: 1px solid var(--navy-line);
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.6;
+      flex: 0 0 auto;
+    }
+    .exclude-state { margin: 0; min-width: 0; color: var(--navy-muted); }
     .exclude-state b { color: var(--navy-900); }
     .exclude-state .bad { color: #b42318; }
-    .exclude-msg { margin: 8px 0 0; font-size: 12px; line-height: 1.5; }
+    /* 名单规模做成可点的入口：它本身就是一个数字，点它看明细比在页头再加一个按钮
+       更符合「你在看什么就点什么」。文字级按钮，不参与页头那套按钮层级。 */
+    .exclude-link {
+      all: unset;
+      cursor: pointer;
+      color: var(--navy-900);
+      font-weight: 650;
+      text-decoration: underline;
+      text-decoration-color: rgba(14, 42, 71, 0.3);
+      text-underline-offset: 2px;
+    }
+    .exclude-link:hover { text-decoration-color: var(--navy-900); }
+    .exclude-link:focus-visible { outline: 2px solid rgba(14, 42, 71, 0.35); outline-offset: 2px; border-radius: 3px; }
+    /* 刷新结果独占一行，空串时整行收起：不再占用页头高度。 */
+    .exclude-msg { margin: 0; flex: 0 0 100%; font-size: 12px; line-height: 1.5; }
+    .exclude-msg:empty { display: none; }
     .exclude-msg.ok { color: #1f7a4d; }
     .exclude-msg.err { color: #b42318; }
     .table-wrap { flex: 1 1 auto; min-height: 0; overflow: auto; }
@@ -173,22 +218,162 @@
     .suffix { display: flex; align-items: center; gap: 8px; }
     .suffix input { flex: 1; }
     .suffix em { font-style: normal; color: var(--navy-faint); font-size: 12px; }
+    /* 按钮体系：一屏 5 个操作，靠底色和边框分成四层。
+       之前「参数设置」被做成最深实心块，视觉上像主操作，实际却是最低频的入口；
+       而「刷新记录」「漏报对账」用透明底，和旁边白底按钮深浅不一，看着像坏样式。
+       层级：ghost（无框文字） < 默认（白底描边，查看类） < accent（浅底，会改名单） < primary（实心，执行动作）。 */
     button {
+      /* 按压反馈只用两种料，且都关在按钮轮廓内：
+         --ring    内亮边（inset 0 0 0 1px），贴着自己的边框亮一圈，不外扩；
+         --press-in 上沿内阴影，制造「按下去凹一点」的实体感；
+         --ripple  落点涟漪，被 overflow:hidden 裁在按钮内部。
+         之前用 box-shadow 的外扩环（0 0 0 Npx）必然溢出轮廓，环宽再小也还是「外面套了个圈」，
+         inset 之后尺寸由轮廓决定，不存在偏大的问题。 */
+      --ring: rgba(14, 42, 71, 0.18);
+      --press-in: rgba(14, 42, 71, 0.1);
+      --ripple: rgba(14, 42, 71, 0.13);
+      position: relative;
+      isolation: isolate;
+      overflow: hidden;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
       height: 36px;
-      padding: 0 14px;
-      border: 1px solid var(--navy-line);
-      border-radius: 8px;
+      padding: 0 13px;
+      border: 1px solid rgba(14, 42, 71, 0.14);
+      border-radius: 9px;
       background: #fff;
       color: var(--navy-900);
       font: inherit;
       font-size: 13px;
       font-weight: 600;
+      line-height: 1;
+      white-space: nowrap;
       cursor: pointer;
+      box-shadow: 0 1px 1px rgba(14, 42, 71, 0.04);
+      /* box-shadow 单独给一条更慢的曲线：按下瞬间亮起、松开慢慢淡掉，
+         光晕才有「余晖」而不是跟着手一起消失。 */
+      transition: background-color 0.16s ease, border-color 0.16s ease,
+                  color 0.16s ease, transform 0.12s cubic-bezier(0.2, 0.7, 0.3, 1),
+                  box-shadow 0.28s cubic-bezier(0.2, 0.7, 0.3, 1);
+      -webkit-tap-highlight-color: transparent;
     }
-    button.primary { background: var(--navy-900); border-color: var(--navy-900); color: #fafaf7; }
-    button.ghost { background: transparent; }
-    button.tiny { height: 28px; padding: 0 8px; font-size: 12px; font-weight: 500; }
-    button:disabled { opacity: 0.55; cursor: default; }
+    /* 图标只做辅助识别，不抢字；14px 描边图标 + 6px 间距，宽度比纯文字多 20px 左右。 */
+    button .ico { width: 14px; height: 14px; flex: 0 0 auto; opacity: 0.72; }
+
+    /* 落点涟漪：JS 在 pointerdown 处插入一枚 .ripple，径向扩散并淡出。
+       z-index:-1 让它压在文字和图标之下（button 上的 isolation 保证它不会掉到按钮背景后面）。
+       渐变在 50% 处就收干：止点越往外，扩散到最满时越像「整块按钮被一团灰盖住」；
+       收在 50% 才读得出是按下位置上的一小片亮斑。 */
+    button > .ripple {
+      position: absolute;
+      left: var(--rx, 50%);
+      top: var(--ry, 50%);
+      width: var(--rs, 140px);
+      height: var(--rs, 140px);
+      margin: calc(var(--rs, 140px) / -2) 0 0 calc(var(--rs, 140px) / -2);
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--ripple), transparent 50%);
+      opacity: 0.8;
+      transform: scale(0);
+      z-index: -1;
+      pointer-events: none;
+      animation: btn-ripple 0.46s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+    }
+    @keyframes btn-ripple {
+      to { opacity: 0; transform: scale(1); }
+    }
+
+    button:hover {
+      border-color: rgba(14, 42, 71, 0.26);
+      box-shadow: 0 2px 6px -2px rgba(14, 42, 71, 0.18);
+    }
+    /* 按下：位移 + 内亮边 + 上沿内阴影，全部落在轮廓里，外面不多出任何一圈。
+       transition-duration 压到 60ms，反馈几乎与手指同时到位；
+       松开后回到基态的 280ms，内亮边缓缓退掉——「快亮慢灭」，这是按压手感的来源。 */
+    button:active {
+      background: var(--surface-warm);
+      box-shadow: inset 0 0 0 1px var(--ring), inset 0 2px 5px -3px var(--press-in);
+      transform: scale(0.985);
+      transition-duration: 0.06s;
+    }
+    button:focus-visible { outline: 2px solid rgba(14, 42, 71, 0.35); outline-offset: 2px; }
+
+    button.primary {
+      /* 深底按钮的内亮边用白色：1px 细白边贴在内侧，比拿 navy 加深更有「发光」的意思，
+         而且它同样被轮廓裁住，不会像外扩环那样鼓出来。 */
+      --ring: rgba(255, 255, 255, 0.26);
+      --press-in: rgba(0, 0, 0, 0.55);
+      --ripple: rgba(255, 255, 255, 0.3);
+      background: var(--navy-900);
+      border-color: var(--navy-900);
+      color: #fafaf7;
+      box-shadow: 0 2px 8px -3px rgba(14, 42, 71, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
+    button.primary .ico { opacity: 0.9; }
+    button.primary:hover {
+      background: #16395c;
+      border-color: #16395c;
+      /* hover 时内侧先透出半圈很淡的高光，按下才满格：
+         用同一处内亮边提前预告「这里有反馈」，又不额外占一点外部空间。 */
+      box-shadow: 0 4px 12px -4px rgba(14, 42, 71, 0.6),
+                  inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    }
+    button.primary:active {
+      background: #0a2138;
+      border-color: #0a2138;
+      box-shadow: inset 0 0 0 1px var(--ring), inset 0 2px 6px -3px var(--press-in),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+
+    /* 会改动名单的动作：浅 navy 底 + 更实的边框，比「查看」重一档，比「立即跑一轮」轻一档。
+       刻意保持单色（navy 系），页面里只留白 / 浅 navy / 实心 navy 三种底色，
+       不引入第二个彩色按钮，「参数设置」的深块也就不再是视觉焦点。 */
+    button.accent {
+      --ring: rgba(14, 42, 71, 0.24);
+      --press-in: rgba(14, 42, 71, 0.12);
+      --ripple: rgba(14, 42, 71, 0.15);
+      background: rgba(14, 42, 71, 0.07);
+      border-color: rgba(14, 42, 71, 0.2);
+      box-shadow: none;
+    }
+    button.accent:hover { background: rgba(14, 42, 71, 0.11); border-color: rgba(14, 42, 71, 0.3); }
+    button.accent:active {
+      background: rgba(14, 42, 71, 0.14);
+      box-shadow: inset 0 0 0 1px var(--ring), inset 0 2px 5px -3px var(--press-in);
+    }
+
+    /* 低频入口（参数设置 / 关闭 / 取消）：不描边不抢色，hover 才浮出浅底。
+       按下时也不给内亮边——亮边是「值得注意」的信号，给它就等于把层级又抬回去；
+       只保留底色压暗和落点涟漪，点击仍是有回应的。 */
+    button.ghost {
+      --ring: transparent;
+      --press-in: rgba(14, 42, 71, 0.08);
+      --ripple: rgba(14, 42, 71, 0.09);
+      background: transparent;
+      border-color: transparent;
+      color: var(--navy-muted);
+      box-shadow: none;
+    }
+    button.ghost:hover {
+      background: rgba(14, 42, 71, 0.05);
+      border-color: rgba(14, 42, 71, 0.14);
+      color: var(--navy-900);
+    }
+    button.ghost:active { background: rgba(14, 42, 71, 0.08); box-shadow: none; }
+
+    button.tiny { height: 28px; padding: 0 9px; font-size: 12px; font-weight: 500; }
+    /* pointer-events:none 让禁用态彻底不吃 hover，省掉一堆 :disabled:hover 的补丁。 */
+    button:disabled { opacity: 0.5; cursor: default; box-shadow: none; pointer-events: none; }
+
+    /* 系统设置了减弱动效时，只留状态色变化，不留位移和扩散。 */
+    @media (prefers-reduced-motion: reduce) {
+      button { transition-duration: 0.01ms; }
+      button:active { transform: none; }
+      button > .ripple { display: none; }
+    }
     .toggle {
       display: inline-flex;
       align-items: center;
@@ -235,6 +420,25 @@
     .chip.customer { background: #e8f1fb; color: #184a86; }
     .chip.ok { background: #e8f6ee; color: #1f7a4d; }
     .chip.fail { background: #fde8e6; color: #b42318; }
+    /* 命中标记：只区分「命中 / 未命中」，用绿/灰，不引入红——未命中不是错误，
+       而「三条皆未命中」才是需要被注意的状态，那个用 .hits .none 单独标。 */
+    .hits { display: inline-flex; align-items: baseline; gap: 10px; }
+    .hit { font-weight: 700; white-space: nowrap; }
+    .hit.on { color: #1f7a4d; }
+    .hit.off { color: rgba(14, 42, 71, 0.3); font-weight: 500; }
+    .hits .none { color: #b42318; font-size: 12px; }
+    /* 明细里的说明块：解释口径，长文本、可换行，与表格分开读。 */
+    .exclude-note {
+      margin: 0;
+      padding: 12px 20px;
+      background: var(--surface-warm);
+      border-bottom: 1px solid var(--navy-line-soft);
+      color: var(--navy-muted);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+    .exclude-note b { color: var(--navy-900); }
+    .exclude-note .bad { color: #b42318; }
     .empty { padding: 40px 20px; text-align: center; color: var(--navy-faint); font-size: 13px; }
     .overlay {
       position: fixed;
@@ -294,26 +498,52 @@
     @media (max-width: 720px) {
       .row { grid-template-columns: 1fr; gap: 6px; }
       .row .k { padding-top: 0; }
+      /* 窄屏下按钮组比页面还宽：允许它折成多行并等分，避免被裁掉右半边。 */
+      .hero-actions { flex: 1 1 100%; justify-content: flex-start; }
+      .hero-actions > button { flex: 1 1 auto; }
     }
   </style>
 </head>
 <body>
   <div class="page">
     <div class="hero">
-      <div>
+      <div class="hero-copy">
         <h1>预付费余额预警</h1>
-        <p>每 15 分钟判定一轮。参数在「参数设置」中修改，保存后立即生效；授信排除名单每日 07:30 自动刷新。</p>
+        <!-- 说明按「；」硬断行：按钮组加宽后这一行的可用宽度只剩 540 左右，
+             靠浏览器自然折行会断在「授信排除」这种半个短语上，硬断更稳。 -->
+        <p>每 15 分钟判定一轮。参数在「参数设置」中修改，保存后立即生效；<br />授信排除名单每日 07:30 自动刷新。</p>
       </div>
-      <div class="hero-actions">
-        <button type="button" class="ghost" id="reload">刷新记录</button>
-        <button type="button" class="ghost" id="open-miss">漏报对账</button>
-        <button type="button" id="run">立即跑一轮</button>
-        <button type="button" class="primary" id="open-settings">参数设置</button>
+      <div class="hero-actions" role="group" aria-label="页面操作">
+        <button type="button" id="open-miss">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 5.5h9M9 3.5l2.5 2L9 7.5" /><path d="M13.5 10.5h-9M7 8.5l-2.5 2L7 12.5" /></svg>
+          漏报对账
+        </button>
+        <button type="button" id="reload">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.2 8a5.2 5.2 0 1 1-1.6-3.75" /><path d="M13.4 2.6v3.1h-3.1" /></svg>
+          刷新当前记录
+        </button>
+        <button type="button" class="accent" id="refresh-exclude"
+                title="同步授信排除名单：按当前窗口重扫睿动账单库，重建整份排除名单并原子替换（每日 07:30 也会自动刷新）">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3h11l-4.2 5v4.2L6.7 13.5V8L2.5 3Z" /></svg>
+          同步授信排除名单
+        </button>
+        <button type="button" class="primary" id="run">
+          <svg class="ico" viewBox="0 0 16 16" fill="currentColor" stroke="none" aria-hidden="true"><path d="M5.7 3.2a.6.6 0 0 1 .92-.5l6.1 4.8a.6.6 0 0 1 0 1l-6.1 4.8a.6.6 0 0 1-.92-.5V3.2Z" /></svg>
+          立即跑一轮
+        </button>
+        <button type="button" class="ghost" id="open-settings">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 5h11M2.5 11h11" /><circle cx="6" cy="5" r="1.7" /><circle cx="10" cy="11" r="1.7" /></svg>
+          参数设置
+        </button>
       </div>
     </div>
     <div class="status-row">
       <p class="summary" id="summary">当前参数加载中…</p>
       <div class="msg" id="msg"></div>
+    </div>
+    <div class="exclude-bar">
+      <p class="exclude-state" id="exclude-state">授信排除名单状态加载中…</p>
+      <p class="exclude-msg" id="exclude-msg"></p>
     </div>
     <section class="panel">
       <div class="panel-head">
@@ -368,7 +598,7 @@
           <h2 id="settings-title">参数设置</h2>
           <p>修改参数配置，点击保存后立即生效。</p>
         </div>
-        <button type="button" class="ghost" id="close-settings" aria-label="关闭">关闭</button>
+        <button type="button" id="close-settings" aria-label="关闭">关闭</button>
       </div>
       <form id="settings">
         <div class="dialog-body">
@@ -432,16 +662,8 @@
                   <input name="credit_advance_window_days" type="number" step="1" min="1" max="365" required />
                   <em>天</em>
                 </div>
-                <p class="note">满足任一即判定为授信活跃、不进预警池：仍有未清垫付债务；窗口内产生过信用垫付；窗口内有信用核销。排除期起算点取「最后一次垫付或最后一次核销中较晚者」，因此实际可能长于「最后垫付 + 窗口天数」——到期了还在名单里是正常的。默认 90，范围 1–365；改后需刷新名单才生效。</p>
-              </div>
-            </li>
-            <li class="row">
-              <div class="k">授信排除名单</div>
-              <div class="v">
-                <p class="exclude-state" id="exclude-state">名单状态加载中…</p>
-                <button type="button" class="ghost" id="refresh-exclude">立即刷新名单</button>
-                <p class="note">每日 07:30（北京时间）自动全量刷新，判定轮次只读名单、不回扫消费明细。刷新失败沿用上一份名单；从未成功刷新时当轮停止圈选并告警。</p>
-                <p class="exclude-msg" id="exclude-msg"></p>
+                <p class="note">满足任一即判定为授信活跃、不进预警池：仍有未清垫付债务；窗口内产生过信用垫付；窗口内有信用核销。排除期起算点取「最后一次垫付或最后一次核销中较晚者」，因此实际可能长于「最后垫付 + 窗口天数」——到期了还在名单里是正常的。默认 90，范围 1–365；改后需点页面顶部「同步授信排除名单」才生效。</p>
+                <p class="note">名单每日 07:30（北京时间）自动全量刷新，判定轮次只读名单、不回扫消费明细。刷新失败沿用上一份名单；从未成功刷新时当轮停止圈选并告警，状态显示在页面顶部。</p>
               </div>
             </li>
             <li class="row">
@@ -487,7 +709,7 @@
           <h2 id="miss-title">漏报对账</h2>
           <p>扫描余额 ≤ 0 的预付费企业，回查过去 7 天有无预警/紧急记录。漏报应为 0。</p>
         </div>
-        <button type="button" class="ghost" id="close-miss" aria-label="关闭">关闭</button>
+        <button type="button" id="close-miss" aria-label="关闭">关闭</button>
       </div>
       <div class="dialog-body">
         <p class="note" id="miss-summary" style="padding:12px 20px 0;">对账结果加载中…</p>
@@ -509,6 +731,38 @@
       <div class="dialog-foot">
         <button type="button" class="ghost" id="cancel-miss">关闭</button>
         <button type="button" class="primary" id="refresh-miss">重新对账</button>
+      </div>
+    </div>
+  </div>
+  <div class="overlay" id="exclude-overlay" hidden>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="exclude-title" style="width:min(940px,100%);">
+      <div class="dialog-head">
+        <div>
+          <h2 id="exclude-title">授信排除名单明细</h2>
+          <p>名单由每日 07:30 全量重建；判定轮次只读这份名单，不回扫消费明细。</p>
+        </div>
+        <button type="button" id="close-exclude" aria-label="关闭">关闭</button>
+      </div>
+      <div class="exclude-note" id="exclude-note">加载中…</div>
+      <div class="dialog-body">
+        <div class="table-wrap" style="max-height:420px;">
+          <table class="records">
+            <thead>
+              <tr>
+                <th>企业</th>
+                <th>账户状态</th>
+                <th>排除主因</th>
+                <th title="按当前计费库实时重算，可能比名单新">当前命中</th>
+                <th>名单写入时间</th>
+              </tr>
+            </thead>
+            <tbody id="exclude-rows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="dialog-foot">
+        <button type="button" class="ghost" id="cancel-exclude">关闭</button>
+        <button type="button" class="primary" id="reload-exclude">重新加载</button>
       </div>
     </div>
   </div>
@@ -576,11 +830,11 @@
     function renderExcludeState(st) {
       const el = $("#exclude-state");
       if (!st) {
-        el.textContent = "名单状态加载失败";
+        el.textContent = "授信排除名单状态加载失败";
         return;
       }
       if (!st.ready) {
-        el.innerHTML = '<span class="bad">从未成功刷新：当前已停止圈选（fail closed），不会发出任何余额预警。请立即刷新名单。</span>';
+        el.innerHTML = '<span class="bad">从未成功刷新：当前已停止圈选（fail closed），不会发出任何余额预警。请点上方「同步授信排除名单」。</span>';
         return;
       }
       const reasons = st.reasons || {};
@@ -590,7 +844,11 @@
       // 窗口天数只信后端（刷新时持久化）；拿不到就显示 —，不在前端猜一个 90，
       // 否则页面会在配置被改成别的窗口后继续报"90 天"。
       const windowText = st.window_days ? st.window_days + " 天" : "—";
-      let html = "上次成功 <b>" + esc(fmtTime(st.last_success_at)) + "</b> · 名单 <b>" + listTotal + "</b> 家" +
+      let html = "上次成功 <b>" + esc(fmtTime(st.last_success_at)) + "</b> · 名单 " +
+        // 名单规模做成明细入口：数字本身就在说「这里有 N 条」，点它最自然。
+        // 用 span 而不是 button：内部样式 all:unset 后与正文同流，不参与按钮层级。
+        '<button type="button" class="exclude-link" data-open-exclude title="查看排除名单明细：谁被排除、主因与三条条件的逐条命中">' +
+        listTotal + " 家</button>" +
         "（" + esc(reasonSummary(reasons)) + "）" +
         " · 窗口 <b>" + windowText + "</b>";
       if (st.consecutive_failures) {
@@ -617,6 +875,119 @@
         renderExcludeState(null);
       }
     }
+
+    /* ---------- 排除名单明细 ----------
+       入口是状态栏里的「名单 N 家」。明细的骨架来自 alerting 库，企业名/账户状态/
+       当前命中是对计费库的尽力补充，补不上时后端会返回 enrich_error，页面照常出表。 */
+    const excludeOverlay = $("#exclude-overlay");
+    // 三个条件的短名，顺序即优先级。这里单元格显示的是「每条各自是否成立」，
+    // 与「排除主因」不同：主因只挑最高的一条，所以同时命中多条是常态。
+    const EXCLUDE_HITS = [
+      ["open_debt", "未清垫付"],
+      ["recent_advance", "新垫付"],
+      ["recent_settlement", "核销"]
+    ];
+    const ACCOUNT_STATUS = { active: "正常", suspended: "已暂停", closed: "已关闭" };
+    function hitsCell(h, enriched) {
+      // 补充查询失败时整列收成 —：此时「三条皆未命中」与「查不到」长得一样，
+      // 保险的选择是不给出任何断言。
+      if (!enriched) return '<span class="hit off">—</span>';
+      if (!h || !h.any) {
+        return '<span class="hits"><span class="none">均已不成立</span></span>';
+      }
+      return '<span class="hits">' + EXCLUDE_HITS.map(([k, label]) =>
+        `<span class="hit ${h[k] ? "on" : "off"}">${h[k] ? "✓" : "·"} ${esc(label)}</span>`
+      ).join("") + "</span>";
+    }
+    function accountStateCell(it) {
+      if (!it.found) return chip("off", "计费库无此账户");
+      const parts = [];
+      if (it.deleted) parts.push(chip("fail", "已删除"));
+      if (it.quarantined) parts.push(chip("warn", "半开通隔离"));
+      parts.push(chip(it.account_status === "active" ? "ok" : "off",
+        ACCOUNT_STATUS[it.account_status] || it.account_status || "—"));
+      if (it.account_type && it.account_type !== "enterprise") {
+        parts.push(chip("off", it.account_type));
+      }
+      return parts.join(" ");
+    }
+    function renderExcludeNote(res, shown) {
+      const reasons = res.reasons || {};
+      let html = "共 <b>" + (res.list_total || 0) + "</b> 家（" + esc(reasonSummary(reasons)) + "）" +
+        " · 上次成功 <b>" + esc(fmtTime(res.last_success_at)) + "</b>" +
+        " · 窗口 <b>" + (res.window_days ? res.window_days + " 天" : "—") + "</b>";
+      html += "<br>满足以下<b>任一</b>即排除，三条<b>互相独立</b>、不是彼此的校验：" +
+        "<b>未清垫付</b>＝仍有未核销的信用垫付（无时间窗，多久以前欠的都算）；" +
+        "<b>新垫付</b>＝窗口内产生过信用垫付；" +
+        "<b>核销</b>＝窗口内做过对账代充（仅计 <span class=\"mono\">ENTERPRISE_CREDIT</span>）。";
+      html += "<br>「排除主因」按 <b>未清垫付 &gt; 新垫付 &gt; 核销</b> 取最高一条，所以主因只有一个词，" +
+        "而一家企业可能同时命中多条。排除期按「最后一次垫付或最后一次核销中<b>较晚者</b> + 窗口天数」计算，" +
+        "因此到期了仍在名单里是正常的。";
+      html += "<br>「当前命中」是打开本页时按计费库<b>实时重算</b>的，可能比名单新：" +
+        "三条均不成立表示它已不该被排除，等下一次刷新会自动移出。";
+      if (res.truncated) {
+        html += '<br><span class="bad">名单超过单次上限，本页只显示前 ' + shown + " 家。</span>";
+      }
+      if (res.enrich_error) {
+        html += '<br><span class="bad">' + esc(res.enrich_error) + "</span>";
+      }
+      $("#exclude-note").innerHTML = html;
+    }
+    async function loadExcludes() {
+      const res = await api("/balance-alert/excludes") || {};
+      const items = Array.isArray(res.items) ? res.items : [];
+      renderExcludeNote(res, items.length);
+      if (!items.length) {
+        $("#exclude-rows").innerHTML = `<tr><td colspan="5"><div class="empty">名单为空</div></td></tr>`;
+        return;
+      }
+      // enrich_error 非空时企业名与命中都缺失，此时不把「未命中」当结论展示。
+      const enriched = !res.enrich_error;
+      $("#exclude-rows").innerHTML = items.map((it) => `<tr>
+        <td>
+          <div>${esc(it.enterprise_name || "—")}</div>
+          <div class="mono" style="color:var(--navy-faint);font-size:12px;">${esc(it.billing_account_id)}</div>
+        </td>
+        <td>${accountStateCell(it)}</td>
+        <td>${chip("off", EXCLUDE_REASON[it.reason] || it.reason || "—")}</td>
+        <td>${hitsCell(it.hits, enriched)}</td>
+        <td class="mono">${fmtTime(it.refreshed_at)}</td>
+      </tr>`).join("");
+    }
+    function openExcludes() {
+      excludeOverlay.hidden = false;
+      excludeOverlay.classList.add("open");
+      document.body.classList.add("modal-open");
+      loadExcludes().catch((e) => {
+        $("#exclude-note").innerHTML = '<span class="bad">加载失败：' + esc(e.message) + "</span>";
+        $("#exclude-rows").innerHTML = `<tr><td colspan="5"><div class="empty">加载失败</div></td></tr>`;
+      });
+    }
+    function closeExcludes() {
+      excludeOverlay.classList.remove("open");
+      excludeOverlay.hidden = true;
+      document.body.classList.remove("modal-open");
+    }
+    $("#close-exclude").onclick = closeExcludes;
+    $("#cancel-exclude").onclick = closeExcludes;
+    $("#reload-exclude").onclick = async () => {
+      const btn = $("#reload-exclude");
+      btn.disabled = true;
+      try {
+        await loadExcludes();
+      } catch (e) {
+        $("#exclude-note").innerHTML = '<span class="bad">加载失败：' + esc(e.message) + "</span>";
+      } finally {
+        btn.disabled = false;
+      }
+    };
+    excludeOverlay.addEventListener("click", (e) => {
+      if (e.target === excludeOverlay) closeExcludes();
+    });
+    // 入口按钮随状态栏每次重渲染，用事件委托而不是直接绑：否则刷新一次状态就失联。
+    document.addEventListener("click", (e) => {
+      if (e.target.closest("[data-open-exclude]")) openExcludes();
+    });
     function ruleLabel(mode) {
       if (mode === "RECHARGE_PCT" || mode === "RECHARGE_5PCT" || mode === "LAST_RECHARGE_5PCT") {
         return "充值 × " + rechargePct() + "%";
@@ -959,6 +1330,7 @@
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && overlay.classList.contains("open")) closeSettings();
       if (e.key === "Escape" && missOverlay.classList.contains("open")) closeMiss();
+      if (e.key === "Escape" && excludeOverlay.classList.contains("open")) closeExcludes();
     });
     $("#run").onclick = async () => {
       try {
@@ -967,7 +1339,7 @@
           msg("预警已停用，本轮未执行", true);
         } else if (s && s.exclude_blocked) {
           // 不说死「从未成功刷新」：名单不可用也可能是读状态失败，具体原因由后端给。
-          const why = s.errors && s.errors.length ? "：" + s.errors[0] : "，请先刷新名单";
+          const why = s.errors && s.errors.length ? "：" + s.errors[0] : "，请先同步授信排除名单";
           msg("排除名单不可用，本轮已停止圈选（fail closed）" + why, false);
         } else {
           // 本轮命中 = 落在候选集内、被排除名单过滤掉的账户数，与名单规模是两个口径。
@@ -994,6 +1366,29 @@
         await loadRecords();
       } catch (err) { msg(err.message, false); }
     });
+    /* 按压涟漪：在指针落点撒一枚会扩散淡出的圆，配合 CSS 里的分层外发光。
+       纯视觉，不改变任何按钮行为；从图标或文字上按下同样生效（事件挂在按钮本身）。
+       键盘触发（Enter / Space）不会经过 pointerdown，此时靠 :active 的光晕给反馈。 */
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    document.addEventListener("pointerdown", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn || btn.disabled || reduceMotion.matches) return;
+      // 文字级入口（名单 N 家）不受这套按压反馈：它 all:unset 之后没有
+      // position/overflow，涟漪会跑到容器外，而且正文里的链接本就不该有按钮手感。
+      if (btn.classList.contains("exclude-link")) return;
+      const box = btn.getBoundingClientRect();
+      // 1.3 倍：盖满按钮即可，外缘由 overflow:hidden 收边，不会溢出轮廓。
+      const size = Math.max(box.width, box.height) * 1.3;
+      const dot = document.createElement("span");
+      dot.className = "ripple";
+      dot.style.setProperty("--rx", (e.clientX - box.left) + "px");
+      dot.style.setProperty("--ry", (e.clientY - box.top) + "px");
+      dot.style.setProperty("--rs", size + "px");
+      // 连点时先清掉上一枚，避免半透明的圆在按钮里叠成一块脏色。
+      btn.querySelectorAll(".ripple").forEach((old) => old.remove());
+      btn.appendChild(dot);
+      dot.addEventListener("animationend", () => dot.remove(), { once: true });
+    }, { passive: true });
     if (!token) {
       msg("未登录，请先打开主站登录后再访问本页", false);
     } else {

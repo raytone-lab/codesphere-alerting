@@ -532,6 +532,7 @@ func (rt *Router) Config(r *gin.Engine) {
 		pages.PUT("/balance-alert/records/:id/review", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertRecordReview)
 		pages.POST("/balance-alert/run", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertRun)
 		pages.GET("/balance-alert/exclude-state", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertExcludeStateGet)
+		pages.GET("/balance-alert/excludes", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertExcludesGet)
 		pages.POST("/balance-alert/exclude-refresh", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertExcludeRefresh)
 		pages.GET("/balance-alert/miss-reports", rt.auth(), rt.user(), rt.perm("/system/balance-alert"), rt.balanceAlertMissReports)
 

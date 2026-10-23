@@ -58,7 +58,7 @@
 | Q2 | 启动补刷改为**同步**（在 `refreshCron.Start()` / `c.Start()` 之前完成） | 兑现"补刷必然早于首轮判定"；否则 xx:59:5x 启动时首轮会静默 fail closed |
 | Q3 | 失败告警按两种情形拆分：**从未成功**（整条链路不可用）与**沿用旧名单**（功能降级） | 前者只报 2 次后永久静默，是最不该省消息的场景 |
 | Q9 | 启动补刷失败**不退出进程**，记录并告警后继续启动 | `n9e-center` 同时承载全部告警能力；为一张派生缓存让整平台停摆，代价远超收益。fail closed 已保证不会误发 |
-| Q10 | 刷新状态新增 `last_notified_failures` 显式计数 | 只有显式计数能区分"已通知"与"通知没发出去"；时间戳推断不可靠 |
+| Q10 | 刷新状态新增 `last_notified_failures`（已通知到第几次失败）与 `last_notified_at`（该次通知送达时间） | 只有显式计数能区分"已通知"与"通知没发出去"；但要判断"群里那条坏了是否该收尾"，还需要通告时间与 `last_success_at` 比大小。只记次数会让"关闭期间恢复、随后又失败"两份消息一起丢 |
 | Q15 | 「从未成功」的告警**只由定时任务发出**；手动刷新只在页面回显错误 | 点按钮的人就在页面上，再推钉钉是重复告知；钉钉留给没人盯着的场景 |
 | Q8 / Q17 | `list_total` **只进 `exclude-state`**，不进判定 `Stats` | 判定轮次的职责是圈人，不该为日志多读一次配置；页面本就同时拉两个接口，拼接成本为零 |
 
@@ -129,8 +129,10 @@
 go test ./balancealert/ ./models/
 
 # 真库集成测试（TC-01 ~ TC-14）
+# -run TestExclude 是刻意的：所有真库用例都以 TestExclude 开头，
+# 任何新用例只要命名不合这个前缀就会在这个命令下"没跑"，而不是"通过"。
 $env:BALANCEALERT_PG_DSN = "host=127.0.0.1 port=5432 user=... dbname=ruidong_billing sslmode=disable"
-go test ./balancealert/ -run TestExcludeScan -v
+go test ./balancealert/ -count=1 -run TestExclude -v
 
 # 刷新与状态
 curl -X POST -H "Authorization: Bearer $TOKEN" localhost:17000/api/n9e/balance-alert/exclude-refresh

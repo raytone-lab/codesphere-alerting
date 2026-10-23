@@ -109,7 +109,7 @@
 - 15 分钟判定只读名单集合在内存过滤，不回扫消费明细，也不跨库 join；
 - 从未成功刷新时当轮不圈人、不发送（fail closed）；有旧名单则沿用并累计失败计数；
 - 被排除企业的自助页只读禁用并显示「当前按信用账期结算，不发送余额预警」，`reason` 细分类别只在运营侧展示；
-- 口径由真库集成测试锁定（TC-01 ~ TC-14）：`BALANCEALERT_PG_DSN=... go test ./balancealert/ -run TestExcludeScan -v`。sqlite 单测跑不了 `make_interval`，不能作为口径验收依据；
+- 口径由真库集成测试锁定（TC-01 ~ TC-14）：`BALANCEALERT_PG_DSN=... go test ./balancealert/ -count=1 -run TestExclude -v`。sqlite 单测跑不了 `make_interval`，不能作为口径验收依据；
 - 详见 `docs/企业预付费余额预警-补充预付费企业识别规则-PRD-2026-10-18.md`（v1.4 替代本文 FR-01）。
 
 **实现逻辑**：

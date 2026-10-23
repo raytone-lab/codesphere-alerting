@@ -58,23 +58,24 @@ func BalanceAlertCreditExcludeIDs(ctx *ctx.Context) (map[string]struct{}, error)
 	return out, nil
 }
 
-// BalanceAlertCreditExcludeGet 查单个账户是否在名单内，并返回其排除原因。
+// BalanceAlertCreditExcludeHas 查单个账户是否在名单内。
 //
 // 自助页只需要「是/否」加一句客户可读文案，不必把整份名单拉进内存；判定轮次仍走
-// BalanceAlertCreditExcludeIDs 的批量路径。
-func BalanceAlertCreditExcludeGet(ctx *ctx.Context, accountID string) (string, bool, error) {
+// BalanceAlertCreditExcludeIDs 的批量路径。刻意不返回 reason：三个细分类别只服务
+// 运营页，客户侧读出来也无处可用，多一个返回值就是多一处误用面。
+func BalanceAlertCreditExcludeHas(ctx *ctx.Context, accountID string) (bool, error) {
 	if accountID == "" {
-		return "", false, nil
+		return false, nil
 	}
-	var row BalanceAlertCreditExclude
-	err := DB(ctx).Where("billing_account_id = ?", accountID).Limit(1).Take(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", false, nil
-	}
+	var ids []string
+	err := DB(ctx).Model(&BalanceAlertCreditExclude{}).
+		Where("billing_account_id = ?", accountID).
+		Limit(1).
+		Pluck("billing_account_id", &ids).Error
 	if err != nil {
-		return "", false, err
+		return false, err
 	}
-	return row.Reason, true, nil
+	return len(ids) > 0, nil
 }
 
 // BalanceAlertCreditExcludeReplace 在**单个事务**内整份替换名单。
@@ -133,6 +134,12 @@ type BalanceAlertExcludeState struct {
 	// 照常累加但不投递，用单一时戳会让重新打开开关后再也报不出来。
 	ConsecutiveFailures  int            `json:"consecutive_failures"`
 	LastNotifiedFailures int            `json:"last_notified_failures,omitempty"`
+	// LastNotifiedAt 是最近一次「失败通知」真正送达的时间。
+	//
+	// 只记次数无法回答「群里那条坏了是不是已经该收尾了」：开关关闭期间先恢复、
+	// 随后又失败时，ConsecutiveFailures 已经不为零，但上一次通告的故障其实被那次
+	// 成功终止过。用它与 LastSuccessAt 比较，补报才知道该先还一笔恢复通知。
+	LastNotifiedAt *time.Time `json:"last_notified_at,omitempty"`
 	WindowDays           int            `json:"window_days,omitempty"`
 	Total                int            `json:"total"`
 	Reasons              map[string]int `json:"reasons,omitempty"`
@@ -168,6 +175,39 @@ func (s BalanceAlertExcludeState) ShouldNotifyFailure() bool {
 // NeedsRecoveryNotice 上一次失败确实已经喊过人，本次成功才需要回一条恢复通知。
 func (s BalanceAlertExcludeState) NeedsRecoveryNotice() bool {
 	return s.LastNotifiedFailures > 0
+}
+
+// NotifiedIncidentEndedAt 上一次已通告的故障，是否在 at 这一刻已经终止。
+//
+// 补报时必须先判断这一条，否则「故障 → 开关关闭 → 恢复 → 又失败 → 开关打开」会
+// 进退两难：按次数看还在故障中（不该说恢复），但群里那条「坏了」其实早就该收尾，
+// 而新故障又因为 LastNotifiedFailures 非零而永远排不上队，两份消息一起丢掉。
+//
+// LastNotifiedAt 为空是旧版本状态（只记了次数）留下的形态：此时没有更细的证据，
+// 保守地认定「已结束」，宁可多发一条恢复，也不让群里永远停在「坏了」。
+func (s BalanceAlertExcludeState) NotifiedIncidentEndedAt(at time.Time) bool {
+	if s.LastNotifiedFailures == 0 {
+		return false
+	}
+	if s.LastNotifiedAt == nil {
+		return true
+	}
+	return at.After(*s.LastNotifiedAt)
+}
+
+// NotifiedIncidentEnded 以「最近一次成功刷新」为判据：那一刻故障是否已经结束。
+// 刷新成功路径不要用它——那里的判据是本次成功的时刻（见 NotifiedIncidentEndedAt）。
+//
+// 旧状态没有 last_notified_at 时，只能用「最近一次尝试是否成功」代替：仍在失败中
+// 就绝不声称恢复（群里那条「坏了」依然准确），等下一次成功再由成功路径收尾。
+func (s BalanceAlertExcludeState) NotifiedIncidentEnded() bool {
+	if s.LastSuccessAt == nil {
+		return false
+	}
+	if s.LastNotifiedAt == nil {
+		return s.ConsecutiveFailures == 0
+	}
+	return s.LastSuccessAt.After(*s.LastNotifiedAt)
 }
 
 func BalanceAlertExcludeStateGet(ctx *ctx.Context) (BalanceAlertExcludeState, error) {

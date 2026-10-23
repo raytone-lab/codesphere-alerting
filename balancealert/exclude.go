@@ -70,7 +70,7 @@ GROUP BY account_id
 `
 
 type ExcludeRefreshResult struct {
-	Trigger     string         `json:"trigger"`
+	Trigger     RefreshTrigger `json:"trigger"`
 	WindowDays  int            `json:"window_days"`
 	Total       int            `json:"total"`
 	Reasons     map[string]int `json:"reasons"`
@@ -78,12 +78,16 @@ type ExcludeRefreshResult struct {
 	DurationMS  int64          `json:"duration_ms"`
 }
 
+// RefreshTrigger 是刷新触发方。用命名类型而不是裸 string：调度口只接受这三个
+// 值，拼写错误应当在编译期就暴露，而不是变成一条永远匹配不上的 if。
+type RefreshTrigger string
+
 // 刷新触发方。MANUAL 刻意不投递运营告警：点按钮的人就在页面上，再推一条钉钉
 // 只是重复告知；告警留给没人盯着的定时任务。
 const (
-	TriggerStartup = "STARTUP"
-	TriggerCron    = "CRON"
-	TriggerManual  = "MANUAL"
+	TriggerStartup RefreshTrigger = "STARTUP"
+	TriggerCron    RefreshTrigger = "CRON"
+	TriggerManual  RefreshTrigger = "MANUAL"
 )
 
 // scanBillingCreditExcludes 只在计费库读：返回「账户 -> 主因」。
@@ -97,11 +101,12 @@ func scanBillingCreditExcludes(n9e *ctx.Context, settings models.BalanceAlertSet
 
 // RefreshCreditExcludes 是全量刷新的唯一入口：cron、启动补刷与参数页手动刷新都走它，
 // 这样失败计数、日志和运营告警只有一处实现。
-func RefreshCreditExcludes(n9e *ctx.Context, trigger string) (ExcludeRefreshResult, error) {
+func RefreshCreditExcludes(n9e *ctx.Context, trigger RefreshTrigger) (ExcludeRefreshResult, error) {
 	settings, err := models.BalanceAlertSettingsGet(n9e)
 	if err != nil {
 		// 连参数都读不出来时也要记账，否则「刷新已经坏了」只留在日志里，页面上
 		// 永远显示上一个成功时间。没有 settings 就没有收件人，只能页面兜底。
+		// 这类失败仍会累加计数：等参数恢复可读的第一次失败就会把这段停机一起报出来。
 		recordExcludeSettingsFailure(n9e, trigger, err)
 		return ExcludeRefreshResult{Trigger: trigger}, err
 	}
@@ -139,25 +144,37 @@ func RefreshCreditExcludes(n9e *ctx.Context, trigger string) (ExcludeRefreshResu
 	now := time.Now()
 	excludeMu.Lock()
 	defer excludeMu.Unlock()
-	prev, _ := models.BalanceAlertExcludeStateGet(n9e)
+	prev, err := models.BalanceAlertExcludeStateGet(n9e)
+	if err != nil {
+		// 读不出状态就绝不整份回写：Put 会把手里的零值写回去（LastSuccessAt 变 nil），
+		// Ready() 随之变假，一次读抖动就被放大成「停止圈人」。
+		logger.Errorf("balancealert exclude refresh (%s): read state: %v", trigger, err)
+		if refreshErr == nil {
+			// 名单已经换新，但健康状态没落库：下一轮仍会 fail closed，必须当错误报出去。
+			return out, fmt.Errorf("read exclude refresh state: %w", err)
+		}
+		return out, refreshErr
+	}
 	state := prev
 	state.LastAttemptAt = &now
-	state.LastTrigger = trigger
+	state.LastTrigger = string(trigger)
 	state.WindowDays = window
 	state.DurationMS = time.Since(started).Milliseconds()
 
 	if refreshErr != nil {
-		state.ConsecutiveFailures = prev.ConsecutiveFailures + 1
 		state.LastError = refreshErr.Error()
+		// 手动刷新只更新「尝试过」，不推进连续失败计数：运营连点两次按钮不该把
+		// 定时任务的失败计数顶到告警阈值，否则下一条钉钉会声称「连续失败 3 次」，
+		// 而实际只有一次定时刷新失败过。错误仍然落在 last_error 上，页面照常显示。
+		if trigger != TriggerManual {
+			state.ConsecutiveFailures = prev.ConsecutiveFailures + 1
+		}
 		logger.Errorf("balancealert exclude refresh (%s) failed: %v (consecutive=%d, last_success=%v)",
 			trigger, refreshErr, state.ConsecutiveFailures, prev.LastSuccessAt)
 		// 只有定时任务/启动补刷喊人；手动刷新的错误回显在页面上。
-		// 告警开关关闭时不投递、也不推进 LastNotifiedFailures，开关打开后仍会补报。
-		// 投递失败（没配 webhook 或 HTTP 失败）同样不推进：没送到的消息不算通知过。
+		// 告警开关关闭时不投递、也不推进记账，开关打开后仍会补报。
 		if trigger != TriggerManual && settings.AlertEnabled() && state.ShouldNotifyFailure() {
-			if notifyExcludeRefreshFailure(settings, state) {
-				state.LastNotifiedFailures = state.ConsecutiveFailures
-			}
+			notifyFailureOwed(settings, &state, now)
 		}
 		if err := models.BalanceAlertExcludeStatePut(n9e, state, "balancealert"); err != nil {
 			logger.Errorf("balancealert exclude state: %v", err)
@@ -172,11 +189,11 @@ func RefreshCreditExcludes(n9e *ctx.Context, trigger string) (ExcludeRefreshResu
 	state.Total = out.Total
 	state.Reasons = out.Reasons
 	// 恢复通知只在「上一次失败已经报过警」时补发，避免把偶发抖动也变成消息。
-	// 发送成功才清零；开关关着或投递失败时保留计数，交给补报去还这笔账。
-	if prev.NeedsRecoveryNotice() &&
-		settings.AlertEnabled() &&
-		notifyExcludeRefreshRecovery(settings, prev.ConsecutiveFailures, out) {
-		state.LastNotifiedFailures = 0
+	// 判据是本次成功的时刻：上一次成功早于通告时刻才是常态（先成功、后连续失败），
+	// 用 prev.LastSuccessAt 去比会把正常恢复吞掉。
+	// 发送成功才清账；开关关着或投递失败时保留计数，交给补报去还这笔账。
+	if settings.AlertEnabled() && prev.NotifiedIncidentEndedAt(now) {
+		notifyRecoveryOwed(settings, &state, incidentFailures(prev), out)
 	}
 	if err := models.BalanceAlertExcludeStatePut(n9e, state, "balancealert"); err != nil {
 		logger.Errorf("balancealert exclude state: %v", err)
@@ -226,20 +243,67 @@ func applyCreditExcludes(n9e *ctx.Context, accounts []Account) ([]Account, int, 
 // recordExcludeSettingsFailure 在连参数都读不出来时记一次失败。
 //
 // 读不到 settings 就没有收件人、也没有窗口，只能把「尝试过、失败了」落到状态里，
-// 让参数页不再显示一个看似正常的上次成功时间。
-func recordExcludeSettingsFailure(n9e *ctx.Context, trigger string, cause error) {
+// 让参数页不再显示一个看似正常的上次成功时间。计数照常累加：等参数恢复可读后的
+// 第一次失败就会把这段停机一起报出来，不会因为「当时没法发消息」而整段消失。
+func recordExcludeSettingsFailure(n9e *ctx.Context, trigger RefreshTrigger, cause error) {
 	excludeMu.Lock()
 	defer excludeMu.Unlock()
-	prev, _ := models.BalanceAlertExcludeStateGet(n9e)
+	prev, err := models.BalanceAlertExcludeStateGet(n9e)
+	if err != nil {
+		// 状态也读不出来时不能整份回写：零值会把 LastSuccessAt 抹掉，反而制造一次
+		// 假 fail closed。这类叠加故障只留在日志里，等配置可读后再记账。
+		logger.Errorf("balancealert exclude refresh (%s) cannot read settings (%v) nor state: %v", trigger, cause, err)
+		return
+	}
 	now := time.Now()
 	prev.LastAttemptAt = &now
-	prev.LastTrigger = trigger
+	prev.LastTrigger = string(trigger)
 	prev.LastError = fmt.Sprintf("read settings: %v", cause)
-	prev.ConsecutiveFailures++
-	logger.Errorf("balancealert exclude refresh (%s) cannot read settings: %v", trigger, cause)
+	if trigger != TriggerManual {
+		prev.ConsecutiveFailures++
+	}
+	logger.Errorf("balancealert exclude refresh (%s) cannot read settings: %v (consecutive=%d)", trigger, cause, prev.ConsecutiveFailures)
 	if err := models.BalanceAlertExcludeStatePut(n9e, prev, "balancealert"); err != nil {
 		logger.Errorf("balancealert exclude state: %v", err)
 	}
+}
+
+// notifyFailureOwed 投递一次失败通知，**送达才推进记账**。
+//
+// 没送到的消息不算通知过：否则恢复通知会声称「已经告诉你们坏了」，而其实谁也没
+// 收到。投递失败时保留待办，下一次失败或开关重新打开会再试。
+//
+// 投递与落库不是原子的（消息先出去、状态后写）：Put 失败时会重复一条，这是刻意
+// 选择的方向——宁可重复，也不能让「已经送达」被记成「没送达」。
+func notifyFailureOwed(settings models.BalanceAlertSettings, state *models.BalanceAlertExcludeState, at time.Time) bool {
+	if !notifyExcludeRefreshFailure(settings, *state) {
+		return false
+	}
+	state.LastNotifiedFailures = state.ConsecutiveFailures
+	state.LastNotifiedAt = &at
+	return true
+}
+
+// notifyRecoveryOwed 投递一次恢复通知并清账。failures 是群里最后看见的那个数字，
+// 不是此刻的连续失败次数：补报场景下两者可能已经不同，说错了等于报了一条假消息。
+func notifyRecoveryOwed(settings models.BalanceAlertSettings, state *models.BalanceAlertExcludeState, failures int, res ExcludeRefreshResult) bool {
+	if !notifyExcludeRefreshRecovery(settings, failures, res) {
+		return false
+	}
+	state.LastNotifiedFailures = 0
+	state.LastNotifiedAt = nil
+	return true
+}
+
+// incidentFailures 取「这次故障影响到的次数」：已通告次数与当前连续失败次数中较大者。
+//
+// 通告后若故障继续到第 3、4 次（刻意不重复发），恢复时应当说 4 次而不是 2 次；
+// 而开关关闭期间先恢复又再失败时，已通告的 2 次比新的 1 次更能说明上一段故障。
+func incidentFailures(s models.BalanceAlertExcludeState) int {
+	if s.ConsecutiveFailures > s.LastNotifiedFailures {
+		return s.ConsecutiveFailures
+	}
+	return s.LastNotifiedFailures
 }
 
 // notifyExcludeRefreshFailure 尽力而为地喊运营：试点期通常配了 legacy DingTalk
@@ -275,9 +339,13 @@ func notifyExcludeRefreshRecovery(settings models.BalanceAlertSettings, failures
 
 // NotifyPendingExcludeOps 在告警总开关从「停用」切回「启用」时补报。
 //
-// 两种待办都要还：还没通知过的失败（ShouldNotifyFailure），以及已经喊过「坏了」
-// 但恢复发生在开关关闭期间的恢复通知（ConsecutiveFailures 已归零、
-// LastNotifiedFailures 仍非零）。少了后者，群里会永远停在「坏了」。
+// 两组待办都要还，而且顺序固定：
+//  1. 已经喊过「坏了」但收尾被开关耽误的恢复通知（NotifiedIncidentEnded）；
+//  2. 还没通知过的失败（ShouldNotifyFailure）。
+//
+// 顺序不能反：恢复通知会把 LastNotifiedFailures 清零，紧随其后的新故障才有资格
+// 按「连续第 2 次」重新排队。少了第 1 步，群里会永远停在「坏了」；把它和失败
+// 通知做成二选一，则会让「关闭期间恢复、随后又失败」两笔账一起丢掉。
 func NotifyPendingExcludeOps(n9e *ctx.Context) {
 	settings, err := models.BalanceAlertSettingsGet(n9e)
 	if err != nil || !settings.AlertEnabled() {
@@ -287,29 +355,22 @@ func NotifyPendingExcludeOps(n9e *ctx.Context) {
 	defer excludeMu.Unlock()
 	state, err := models.BalanceAlertExcludeStateGet(n9e)
 	if err != nil {
+		logger.Errorf("balancealert exclude pending notice: read state: %v", err)
 		return
 	}
 
-	var delivered bool
-	switch {
-	case state.ShouldNotifyFailure():
-		delivered = notifyExcludeRefreshFailure(settings, state)
-		if delivered {
-			state.LastNotifiedFailures = state.ConsecutiveFailures
-		}
-	case state.NeedsRecoveryNotice() && state.ConsecutiveFailures == 0:
+	changed := false
+	if state.NotifiedIncidentEnded() {
 		res := ExcludeRefreshResult{Total: state.Total, Reasons: state.Reasons, WindowDays: state.WindowDays}
 		if state.LastSuccessAt != nil {
 			res.RefreshedAt = *state.LastSuccessAt
 		}
-		delivered = notifyExcludeRefreshRecovery(settings, state.LastNotifiedFailures, res)
-		if delivered {
-			state.LastNotifiedFailures = 0
-		}
-	default:
-		return
+		changed = notifyRecoveryOwed(settings, &state, incidentFailures(state), res)
 	}
-	if !delivered {
+	if state.ShouldNotifyFailure() {
+		changed = notifyFailureOwed(settings, &state, time.Now()) || changed
+	}
+	if !changed {
 		return
 	}
 	if err := models.BalanceAlertExcludeStatePut(n9e, state, "balancealert"); err != nil {

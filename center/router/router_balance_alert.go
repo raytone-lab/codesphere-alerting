@@ -61,10 +61,11 @@ func (rt *Router) balanceAlertSettingsPut(c *gin.Context) {
 	}
 	// 告警停用期间发生的失败不会被投递；开关一打开就补报，否则「从未成功
 	// 刷新」要等到下一次失败（最长一天后）才重新可见。
+	//
+	// 不再二次读取 settings 判断新状态：NotifyPendingExcludeOps 自己首行就检查
+	// 开关，多读一次只会多一个被静默吞掉的错误点。
 	if !prev.AlertEnabled() {
-		if now, err := models.BalanceAlertSettingsGet(rt.Ctx); err == nil && now.AlertEnabled() {
-			balancealert.NotifyPendingExcludeOpsAsync(rt.Ctx)
-		}
+		balancealert.NotifyPendingExcludeOpsAsync(rt.Ctx)
 	}
 	ginx.NewRender(c).Message(nil)
 }
@@ -99,6 +100,17 @@ func (rt *Router) balanceAlertRecordReview(c *gin.Context) {
 
 func (rt *Router) balanceAlertRun(c *gin.Context) {
 	stats, err := balancealert.RunOnce(rt.Ctx, nil)
+	if stats.ExcludeBlocked {
+		// fail closed 是策略降级，不是请求失败：把标志交给页面渲染成明确原因，
+		// 而不是把原始 Go 错误当成一条 toast 弹出来（ginx 的 Data 在 err != nil
+		// 时会丢掉 dat，页面就永远看不到 exclude_blocked）。
+		if err != nil {
+			logger.Warningf("balancealert run: %v", err)
+			stats.Errors = append(stats.Errors, err.Error())
+		}
+		ginx.NewRender(c).Data(stats, nil)
+		return
+	}
 	ginx.NewRender(c).Data(stats, err)
 }
 
@@ -273,7 +285,7 @@ func myAccountMissingMsg(reason string) string {
 // 只暴露布尔值与一句客户可读文案，不暴露 reason 细分类别：OPEN_DEBT /
 // RECENT_SETTLEMENT 这类内部归因对客户既不可操作也是困惑源，只留在运营页。
 func (rt *Router) myExcludeView(accountID string) (bool, string, error) {
-	_, excluded, err := models.BalanceAlertCreditExcludeGet(rt.Ctx, accountID)
+	excluded, err := models.BalanceAlertCreditExcludeHas(rt.Ctx, accountID)
 	if err != nil {
 		return false, "", err
 	}

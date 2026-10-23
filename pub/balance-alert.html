@@ -579,9 +579,12 @@
       // 名单规模（list_total，名单当前行数）与「本轮命中」（判定轮次实际过滤掉的
       // 候选数）是两个口径：名单不按账户状态过滤，可能含已暂停/已删除账户。
       const listTotal = st.list_total != null ? st.list_total : (st.total || 0);
+      // 窗口天数只信后端（刷新时持久化）；拿不到就显示 —，不在前端猜一个 90，
+      // 否则页面会在配置被改成别的窗口后继续报"90 天"。
+      const windowText = st.window_days ? st.window_days + " 天" : "—";
       let html = "上次成功 <b>" + esc(fmtTime(st.last_success_at)) + "</b> · 名单 <b>" + listTotal + "</b> 家" +
         "（" + esc(reasonSummary(reasons)) + "）" +
-        " · 窗口 <b>" + (st.window_days || 90) + "</b> 天";
+        " · 窗口 <b>" + windowText + "</b>";
       if (st.consecutive_failures) {
         html += ' · <span class="bad">连续失败 ' + st.consecutive_failures + " 次（仍在用旧名单）</span>";
         if (st.last_attempt_at) {
@@ -955,7 +958,9 @@
         if (s && s.disabled) {
           msg("预警已停用，本轮未执行", true);
         } else if (s && s.exclude_blocked) {
-          msg("排除名单从未成功刷新，本轮已停止圈选（fail closed），请先刷新名单", false);
+          // 不说死「从未成功刷新」：名单不可用也可能是读状态失败，具体原因由后端给。
+          const why = s.errors && s.errors.length ? "：" + s.errors[0] : "，请先刷新名单";
+          msg("排除名单不可用，本轮已停止圈选（fail closed）" + why, false);
         } else {
           // 本轮命中 = 落在候选集内、被排除名单过滤掉的账户数，与名单规模是两个口径。
           msg("本轮完成：排除 " + (s.excluded || 0) + " 家（名单内命中），圈选 " + s.prepaid +

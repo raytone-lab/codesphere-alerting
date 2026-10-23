@@ -2,7 +2,11 @@ package balancealert
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -117,6 +121,179 @@ func TestSendExcludeOpsNoticeWithoutWebhook(t *testing.T) {
 	// 恢复通知就会声称「已告诉你们」——而其实谁也没收到。
 	if sendExcludeOpsNotice(models.BalanceAlertSettings{}, "x") {
 		t.Fatal("no webhook configured must not count as delivered")
+	}
+}
+
+func TestExcludeStateRecoveryBooking(t *testing.T) {
+	notifiedAt := time.Date(2026, 10, 20, 8, 0, 0, 0, locShanghai)
+	successAfter := notifiedAt.Add(2 * time.Hour)
+	successBefore := notifiedAt.Add(-1 * time.Hour)
+
+	// 已通告的故障被之后的一次成功终止：恢复通知还欠着。
+	ended := models.BalanceAlertExcludeState{
+		LastSuccessAt:        &successAfter,
+		LastNotifiedAt:       &notifiedAt,
+		LastNotifiedFailures: 2,
+		ConsecutiveFailures:  1, // 之后又失败了一次，但上一段故障确实结束过
+	}
+	if !ended.NotifiedIncidentEnded() {
+		t.Fatal("a success after the notified failure must close that incident")
+	}
+	if got := incidentFailures(ended); got != 2 {
+		t.Fatalf("recovery must report the announced count, got %d", got)
+	}
+
+	// 通告之后没有成功过：故障仍在持续，群里那条「坏了」还是最新的。
+	ongoing := models.BalanceAlertExcludeState{
+		LastSuccessAt:        &successBefore,
+		LastNotifiedAt:       &notifiedAt,
+		LastNotifiedFailures: 2,
+		ConsecutiveFailures:  3,
+	}
+	if ongoing.NotifiedIncidentEnded() {
+		t.Fatal("an ongoing incident must not claim recovery")
+	}
+	if got := incidentFailures(ongoing); got != 3 {
+		t.Fatalf("recovery must report the full outage, got %d", got)
+	}
+
+	// 旧版本状态只记了次数：没有更细证据时，恢复态（无条件可败）保守认定已结束，
+	// 宁可多补一条恢复，也不让群里永远停在「坏了」。
+	legacy := models.BalanceAlertExcludeState{
+		LastSuccessAt:        &successAfter,
+		LastNotifiedFailures: 2,
+	}
+	if !legacy.NotifiedIncidentEnded() {
+		t.Fatal("state without last_notified_at must not strand the recovery notice")
+	}
+	// 但旧状态仍在失败中时不能声称恢复：那条「坏了」还是最新的，等下一次成功收尾。
+	legacyFailing := legacy
+	legacyFailing.ConsecutiveFailures = 3
+	if legacyFailing.NotifiedIncidentEnded() {
+		t.Fatal("legacy state that is still failing must not claim recovery")
+	}
+	// 从未成功刷新过，就谈不上「恢复终止过故障」。
+	never := models.BalanceAlertExcludeState{LastNotifiedFailures: 2, ConsecutiveFailures: 3}
+	if never.NotifiedIncidentEnded() {
+		t.Fatal("a never-succeeded incident cannot have ended by success")
+	}
+
+	// 刷新成功路径的判据是「本次成功时刻」，不是上一次成功时刻：先成功、后连续
+	// 失败再成功才是常态，若拿 prev.LastSuccessAt 去比，正常恢复会被静默吞掉。
+	normal := models.BalanceAlertExcludeState{
+		LastSuccessAt:        &successBefore,
+		LastNotifiedAt:       &notifiedAt,
+		LastNotifiedFailures: 2,
+		ConsecutiveFailures:  3,
+	}
+	if !normal.NotifiedIncidentEndedAt(notifiedAt.Add(24 * time.Hour)) {
+		t.Fatal("a refresh succeeding after the notification must send the recovery notice")
+	}
+	if normal.NotifiedIncidentEnded() {
+		t.Fatal("judging by the previous success would hide the normal recovery — use the new success time")
+	}
+}
+
+// TestNotifyPendingExcludeOpsSettlesBothBooks 锁定开关恢复后的补报顺序：
+// 先还「已恢复」的账，再看新故障有没有到告警阈值。两者混成一个 switch 时，
+// 「关闭期间恢复、随后又失败」会把两份消息一起丢掉。
+func TestNotifyPendingExcludeOpsSettlesBothBooks(t *testing.T) {
+	n9e := testRunnerCtx(t)
+	var mu sync.Mutex
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Text struct {
+				Content string `json:"content"`
+			} `json:"text"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		mu.Lock()
+		bodies = append(bodies, payload.Text.Content)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
+	}))
+	defer srv.Close()
+
+	s := models.DefaultBalanceAlertSettings()
+	s.PilotReceivers = []string{srv.URL + "/robot/send?access_token=test"}
+	if err := models.BalanceAlertSettingsPut(n9e, s, "root"); err != nil {
+		t.Fatal(err)
+	}
+
+	sent := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), bodies...)
+	}
+
+	notifiedAt := time.Date(2026, 10, 20, 8, 0, 0, 0, locShanghai)
+	successAfter := notifiedAt.Add(2 * time.Hour)
+	if err := models.BalanceAlertExcludeStatePut(n9e, models.BalanceAlertExcludeState{
+		LastSuccessAt:        &successAfter,
+		LastAttemptAt:        &successAfter,
+		LastNotifiedAt:       &notifiedAt,
+		LastNotifiedFailures: 2,
+		ConsecutiveFailures:  1,
+		Total:                7,
+	}, "root"); err != nil {
+		t.Fatal(err)
+	}
+
+	NotifyPendingExcludeOps(n9e)
+	got := sent()
+	if len(got) != 1 {
+		t.Fatalf("expected exactly the owed recovery notice, got %v", got)
+	}
+	if !strings.Contains(got[0], "已恢复") || !strings.Contains(got[0], "连续失败 2 次") {
+		t.Fatalf("recovery notice must close the announced 2-failure incident, got %q", got[0])
+	}
+	state, err := models.BalanceAlertExcludeStateGet(n9e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.LastNotifiedFailures != 0 || state.LastNotifiedAt != nil {
+		t.Fatalf("delivered recovery must clear the books: %+v", state)
+	}
+
+	// 第二遍没有待办：不能把同一条恢复反复发。
+	NotifyPendingExcludeOps(n9e)
+	if again := sent(); len(again) != 1 {
+		t.Fatalf("second replay must stay silent, got %v", again)
+	}
+}
+
+// TestNotifyPendingExcludeOpsStaysSilentWhileOngoing 锁定「故障还在持续」时不喊恢复。
+func TestNotifyPendingExcludeOpsStaysSilentWhileOngoing(t *testing.T) {
+	n9e := testRunnerCtx(t)
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = w.Write([]byte(`{"errcode":0}`))
+	}))
+	defer srv.Close()
+
+	s := models.DefaultBalanceAlertSettings()
+	s.PilotReceivers = []string{srv.URL + "/robot/send?access_token=test"}
+	if err := models.BalanceAlertSettingsPut(n9e, s, "root"); err != nil {
+		t.Fatal(err)
+	}
+
+	notifiedAt := time.Date(2026, 10, 20, 8, 0, 0, 0, locShanghai)
+	successBefore := notifiedAt.Add(-time.Hour)
+	if err := models.BalanceAlertExcludeStatePut(n9e, models.BalanceAlertExcludeState{
+		LastSuccessAt:        &successBefore,
+		LastNotifiedAt:       &notifiedAt,
+		LastNotifiedFailures: 2,
+		ConsecutiveFailures:  3,
+	}, "root"); err != nil {
+		t.Fatal(err)
+	}
+
+	NotifyPendingExcludeOps(n9e)
+	if hits != 0 {
+		t.Fatalf("an ongoing, already-announced incident must stay silent, got %d messages", hits)
 	}
 }
 

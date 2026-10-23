@@ -25,7 +25,7 @@ import (
 // 用法：
 //
 //	$env:BALANCEALERT_PG_DSN = "host=127.0.0.1 port=5432 user=... dbname=ruidong_billing sslmode=disable"
-//	go test ./balancealert/ -run TestExcludeScan -v
+//	go test ./balancealert/ -run TestExclude -v
 //
 // 未设置 DSN 时整批跳过并打印原因：本仓库没有 CI，跳过必须显眼，不能把
 // 「没跑」当成「通过」。每次运行在同一个 DSN 内建一个临时 schema，结束后
@@ -109,6 +109,13 @@ func createBillingSchema(t *testing.T, db *gorm.DB) {
 			billing_account_id varchar(128) PRIMARY KEY,
 			balance_usd numeric(20,12) NOT NULL DEFAULT 0
 		)`,
+		// 计费侧的信用配置表：本特性的口径刻意不读它（只看垫付/核销行为），
+		// 建出来是为了让 TC-06 能构造「已开通信用账期但从未垫付」的真实形态。
+		`CREATE TABLE billing_account_credit_configs (
+			billing_account_id varchar(128) PRIMARY KEY,
+			status varchar(32) NOT NULL,
+			approved_credit_usd numeric(20,12) NOT NULL DEFAULT 0
+		)`,
 		`CREATE TABLE balance_transactions (
 			id bigserial PRIMARY KEY,
 			billing_account_id varchar(128) NOT NULL,
@@ -164,6 +171,24 @@ func unapprovedOnly(t *testing.T, db *gorm.DB, account string, age int) {
 		(billing_account_id, approved_credit_usd, unapproved_debt_usd, settled_usd, created_at)
 		VALUES (?, 0, 12.5, NULL, ?)`, account, daysAgo(age)).Error; err != nil {
 		t.Fatalf("insert unapproved row %s: %v", account, err)
+	}
+}
+
+// creditConfig 登记一条「已开通信用账期」的配置，并把钱包预置为正数。
+//
+// 计费侧确实有这张表，但本特性刻意不读它：口径只看垫付/核销行为（见 billing.go
+// 对旧配置口径的说明）。TC-06 保留这条数据，正好把「配置为 ACTIVE 但从未垫付
+// 不构成排除」钉死——否则这条用例和 TC-05 只是名字不同。
+func creditConfig(t *testing.T, db *gorm.DB, account string, balance float64) {
+	t.Helper()
+	if err := db.Exec(`INSERT INTO billing_account_credit_configs
+		(billing_account_id, status, approved_credit_usd) VALUES (?, 'ACTIVE', 1000)`,
+		account).Error; err != nil {
+		t.Fatalf("insert credit config %s: %v", account, err)
+	}
+	if err := db.Exec(`INSERT INTO account_wallets (billing_account_id, balance_usd) VALUES (?, ?)`,
+		account, balance).Error; err != nil {
+		t.Fatalf("insert wallet %s: %v", account, err)
 	}
 }
 
@@ -254,8 +279,11 @@ func TestExcludeScanAgainstPostgres(t *testing.T) {
 	// TC-05 真预付费企业：从无垫付记录。
 	account(t, db, "tc05", "enterprise", "active", false)
 
-	// TC-06 新授信未穿 0：有配置、钱包为正、从无垫付——与 TC-05 同构。
+	// TC-06 新授信未穿 0：已开通信用账期、钱包为正、从无垫付。
+	// 结论必须与 TC-05 相同——「有信用配置」本身不是排除条件，否则会把所有
+	// 刚开通授信、还没用过的企业一起排除。
 	account(t, db, "tc06", "enterprise", "active", false)
+	creditConfig(t, db, "tc06", 500)
 
 	// TC-08 近窗纯余额消费：窗口内有普通消费分摊，但 approved_credit_usd = 0。
 	account(t, db, "tc08", "enterprise", "active", false)
@@ -347,13 +375,13 @@ func TestExcludeScanIsReadOnly(t *testing.T) {
 	}
 }
 
-// TestPrepaidCandidateSetExcludesPersonalAndQuarantined 覆盖 TC-07 与候选集口径：
+// TestExcludeCandidateSetExcludesPersonalAndQuarantined 覆盖 TC-07 与候选集口径：
 // 只有企业、active、未删除、未隔离的账户才是预警候选。
 //
 // 自助页定位账户用的是另一条 SQL（ResolveAccountByEmailOrPhoneSQL），两条必须
 // 一致，否则会出现「页面说你在池里、圈选却跳过你」。因此不比对 SQL 文本，而是
 // 直接跑两条 SQL 断言同一个被隔离账户在两处都不可见。
-func TestPrepaidCandidateSetExcludesPersonalAndQuarantined(t *testing.T) {
+func TestExcludeCandidateSetExcludesPersonalAndQuarantined(t *testing.T) {
 	db := pgTestDB(t)
 	user(t, db, "u-quarantined", "q@example.com", "")
 	user(t, db, "u-ok", "ok@example.com", "")

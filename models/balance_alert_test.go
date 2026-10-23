@@ -202,14 +202,14 @@ func TestBalanceAlertCreditAdvanceWindow(t *testing.T) {
 	}
 }
 
-func TestBalanceAlertCreditExcludeGet(t *testing.T) {
+func TestBalanceAlertCreditExcludeHas(t *testing.T) {
 	c := testBalanceAlertCtx(t)
 
-	if _, ok, err := BalanceAlertCreditExcludeGet(c, "missing"); err != nil || ok {
+	if ok, err := BalanceAlertCreditExcludeHas(c, "missing"); err != nil || ok {
 		t.Fatalf("missing account: ok=%v err=%v", ok, err)
 	}
 	// 空 ID 不该打库，也不该命中：自助页在定位失败时会传空串。
-	if _, ok, err := BalanceAlertCreditExcludeGet(c, ""); err != nil || ok {
+	if ok, err := BalanceAlertCreditExcludeHas(c, ""); err != nil || ok {
 		t.Fatalf("empty id: ok=%v err=%v", ok, err)
 	}
 
@@ -218,12 +218,12 @@ func TestBalanceAlertCreditExcludeGet(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	reason, ok, err := BalanceAlertCreditExcludeGet(c, "ba-credit")
+	ok, err := BalanceAlertCreditExcludeHas(c, "ba-credit")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok || reason != ExcludeReasonRecentSettlement {
-		t.Fatalf("ok=%v reason=%q", ok, reason)
+	if !ok {
+		t.Fatal("listed account must be reported as excluded")
 	}
 	// 客户侧文案只说明授信账期，不能出现内部归因。
 	if strings.Contains(ExcludeNoticeCustomer, ExcludeReasonRecentSettlement) ||

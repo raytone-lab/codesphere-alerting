@@ -818,7 +818,8 @@
     const EXCLUDE_REASON = {
       OPEN_DEBT: "未清垫付",
       RECENT_ADVANCE: "窗口内新垫付",
-      RECENT_SETTLEMENT: "窗口内信用核销"
+      RECENT_SETTLEMENT: "窗口内信用核销",
+      UNCERTAIN_SETTLEMENT: "核销分类待核实"
     };
     // 三个 reason 的中文译名只在 EXCLUDE_REASON 里定义一次：清单里再写一遍
     // 就会出现「改了映射、某处文案还是旧的」这种漂移。
@@ -885,7 +886,8 @@
     const EXCLUDE_HITS = [
       ["open_debt", "未清垫付"],
       ["recent_advance", "新垫付"],
-      ["recent_settlement", "核销"]
+      ["recent_settlement", "信用核销"],
+      ["uncertain_settlement", "分类待核实"]
     ];
     const ACCOUNT_STATUS = { active: "正常", suspended: "已暂停", closed: "已关闭" };
     function hitsCell(h, enriched) {
@@ -1233,12 +1235,13 @@
         return;
       }
       const misses = Array.isArray(res.misses) ? res.misses : [];
-      $("#miss-summary").textContent = "扫描 " + (res.prepaid_scanned || 0) + " 家预付费企业，漏报 " + misses.length + " 家（回看 " + (res.lookback_days || 7) + " 天）。";
-      if (!misses.length) {
+      const reviews = Array.isArray(res.exclude_reviews) ? res.exclude_reviews : [];
+      $("#miss-summary").textContent = "扫描 " + (res.prepaid_scanned || 0) + " 家预付费企业，余额不大于零且近 " + (res.lookback_days || 7) + " 天无成功通知 " + misses.length + " 家；排除名单待复核 " + reviews.length + " 家。";
+      if (!misses.length && !reviews.length) {
         $("#miss-rows").innerHTML = `<tr><td colspan="5"><div class="empty">无漏报</div></td></tr>`;
         return;
       }
-      $("#miss-rows").innerHTML = misses.map((m) => `<tr>
+      $("#miss-rows").innerHTML = misses.concat(reviews.map((r) => ({...r, current_state: "待复核"}))).map((m) => `<tr>
         <td>${esc(m.billing_account_id || "—")}</td>
         <td>${esc(m.name || "—")}</td>
         <td class="mono">${money(m.balance_usd)}</td>

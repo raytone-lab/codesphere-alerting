@@ -20,6 +20,10 @@ type fakeStore struct {
 	err          error
 }
 
+func (f fakeStore) ReviewLowBalanceExcludes(ctx context.Context, accounts []Account, windowDays int) ([]ExcludeReview, error) {
+	return nil, f.err
+}
+
 func (f fakeStore) ListPrepaid(ctx context.Context) ([]Account, error) {
 	return f.accts, f.err
 }

@@ -202,9 +202,10 @@ func (rt *Router) balanceAlertExcludesGet(c *gin.Context) {
 	enrich := rt.lookupExcludeEnrich(rows, windowDays)
 
 	type hits struct {
-		OpenDebt         bool `json:"open_debt"`
-		RecentAdvance    bool `json:"recent_advance"`
-		RecentSettlement bool `json:"recent_settlement"`
+		OpenDebt            bool `json:"open_debt"`
+		RecentAdvance       bool `json:"recent_advance"`
+		RecentSettlement    bool `json:"recent_settlement"`
+		UncertainSettlement bool `json:"uncertain_settlement"`
 		// Any 由后端算，不让页面从三个 bool 自己推：口径只留一处。
 		Any bool `json:"any"`
 	}
@@ -241,10 +242,11 @@ func (rt *Router) balanceAlertExcludesGet(c *gin.Context) {
 		}
 		if h, ok := enrich.Hits[r.BillingAccountID]; ok {
 			it.Hits = hits{
-				OpenDebt:         h.OpenDebt,
-				RecentAdvance:    h.RecentAdvance,
-				RecentSettlement: h.RecentSettlement,
-				Any:              h.Any(),
+				OpenDebt:            h.OpenDebt,
+				RecentAdvance:       h.RecentAdvance,
+				RecentSettlement:    h.RecentSettlement,
+				UncertainSettlement: h.UncertainSettlement,
+				Any:                 h.Any(),
 			}
 		}
 		items = append(items, it)

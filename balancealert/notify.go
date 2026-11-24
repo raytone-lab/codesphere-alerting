@@ -211,6 +211,9 @@ func Dispatch(httpClient HTTPClient, req SendRequest) SendResult {
 		return SendResult{}
 	case SendModePilot:
 		text := RenderPilotLine(req.Name, req.Balance, req.Threshold, req.Level)
+		if strings.TrimSpace(req.CopyOverride) != "" {
+			text = RenderCopy(req)
+		}
 		var lastErr error
 		receivers := make([]string, 0, len(req.PilotURLs))
 		for _, u := range req.PilotURLs {

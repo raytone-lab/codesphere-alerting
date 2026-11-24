@@ -14,16 +14,17 @@ import (
 // 排除原因，与物化行 reason 一一对应。
 // 同一企业多条件命中时只落主因：OPEN_DEBT > RECENT_ADVANCE > RECENT_SETTLEMENT。
 const (
-	ExcludeReasonOpenDebt         = "OPEN_DEBT"
-	ExcludeReasonRecentAdvance    = "RECENT_ADVANCE"
-	ExcludeReasonRecentSettlement = "RECENT_SETTLEMENT"
+	ExcludeReasonOpenDebt            = "OPEN_DEBT"
+	ExcludeReasonRecentAdvance       = "RECENT_ADVANCE"
+	ExcludeReasonRecentSettlement    = "RECENT_SETTLEMENT"
+	ExcludeReasonUncertainSettlement = "UNCERTAIN_SETTLEMENT"
 )
 
 // ExcludeNoticeCustomer 是客户侧唯一可见的排除说明。
 //
 // reason 的三个细分类别只留在运营侧：对客户来说「未清垫付」「窗口内核销」既不
 // 可操作也是困惑源。客户只需要知道「按信用账期结算、不发余额预警」。
-const ExcludeNoticeCustomer = "当前按信用账期结算，不发送余额预警"
+const ExcludeNoticeCustomer = "当前账户暂不发送余额预警，请联系运营核实"
 
 // BalanceAlertCreditExclude 是预付费圈选的「授信活跃」排除名单。
 //

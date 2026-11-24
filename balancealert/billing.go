@@ -165,6 +165,7 @@ WHERE u.deleted_at IS NULL
 
 type Store interface {
 	ListPrepaid(ctx context.Context) ([]Account, error)
+	ReviewLowBalanceExcludes(ctx context.Context, accounts []Account, windowDays int) ([]ExcludeReview, error)
 	ListConsumption(ctx context.Context) ([]Consumption, error)
 	ResolveAccountByEmailOrPhone(ctx context.Context, email, phone string) (*MyAccount, error)
 	ListBillingUsers(ctx context.Context) ([]BillingUser, error)
@@ -386,14 +387,15 @@ func LookupAccountBriefs(n9e *ctx.Context, settings models.BalanceAlertSettings,
 // 与物化表里的 reason 是两个层次：reason 是「按优先级选出的一个主因」，Hits 是
 // 「三条各自是否成立」。一家企业可以同时命中三条，reason 只反映其中最高的那条。
 type CreditExcludeHits struct {
-	OpenDebt         bool
-	RecentAdvance    bool
-	RecentSettlement bool
+	OpenDebt            bool
+	RecentAdvance       bool
+	RecentSettlement    bool
+	UncertainSettlement bool
 }
 
 // Any 表示至少命中一条；三条皆假说明该账户在当前数据下已不该被排除。
 func (h CreditExcludeHits) Any() bool {
-	return h.OpenDebt || h.RecentAdvance || h.RecentSettlement
+	return h.OpenDebt || h.RecentAdvance || h.RecentSettlement || h.UncertainSettlement
 }
 
 // ScanCreditExcludeHits 按当前计费库数据重算三条条件的命中情况。
@@ -413,7 +415,7 @@ func (s *PGStore) ScanCreditExcludeHits(ctx context.Context, windowDays int) (ma
 	for rows.Next() {
 		var id string
 		var h CreditExcludeHits
-		if err := rows.Scan(&id, &h.OpenDebt, &h.RecentAdvance, &h.RecentSettlement); err != nil {
+		if err := rows.Scan(&id, &h.OpenDebt, &h.RecentAdvance, &h.RecentSettlement, &h.UncertainSettlement); err != nil {
 			return nil, err
 		}
 		if id != "" {

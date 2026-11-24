@@ -21,20 +21,22 @@ type MissReport struct {
 }
 
 type MissReportResult struct {
-	Disabled       bool         `json:"disabled,omitempty"`
-	AsOf           time.Time    `json:"as_of"`
-	LookbackDays   int          `json:"lookback_days"`
-	PrepaidScanned int          `json:"prepaid_scanned"`
-	Misses         []MissReport `json:"misses"`
+	Disabled       bool            `json:"disabled,omitempty"`
+	AsOf           time.Time       `json:"as_of"`
+	LookbackDays   int             `json:"lookback_days"`
+	PrepaidScanned int             `json:"prepaid_scanned"`
+	Misses         []MissReport    `json:"misses"`
+	ExcludeReviews []ExcludeReview `json:"exclude_reviews"`
 }
 
 // ReconMissReports implements PRD §8.2 漏报对账: scan prepaid enterprises
 // with balance <= 0 and check for any WARN/CRITICAL record in the last N days.
 func ReconMissReports(n9e *ctx.Context, lookbackDays int) (MissReportResult, error) {
 	out := MissReportResult{
-		AsOf:         time.Now().In(locShanghai),
-		LookbackDays: lookbackDays,
-		Misses:       []MissReport{},
+		AsOf:           time.Now().In(locShanghai),
+		LookbackDays:   lookbackDays,
+		Misses:         []MissReport{},
+		ExcludeReviews: []ExcludeReview{},
 	}
 	if lookbackDays <= 0 {
 		lookbackDays = 7
@@ -59,10 +61,32 @@ func ReconMissReports(n9e *ctx.Context, lookbackDays int) (MissReportResult, err
 	}
 	// 与判定轮次同一口径：漏报对账也必须剔除授信活跃企业，否则会把
 	// 正常排除的授信企业报成「漏报」。
-	accts, _, err = applyCreditExcludes(n9e, accts)
+	state, err := models.BalanceAlertExcludeStateGet(n9e)
+	if err != nil {
+		return out, fmt.Errorf("read credit exclude refresh state: %w", err)
+	}
+	if !state.Ready() {
+		return out, fmt.Errorf("credit exclude list never refreshed; fail closed")
+	}
+	excludedIDs, err := models.BalanceAlertCreditExcludeIDs(n9e)
 	if err != nil {
 		return out, err
 	}
+	lowExcluded, filtered := make([]Account, 0), make([]Account, 0, len(accts))
+	for _, a := range accts {
+		if _, excluded := excludedIDs[a.ID]; excluded {
+			if a.Balance <= 0 {
+				lowExcluded = append(lowExcluded, a)
+			}
+		} else {
+			filtered = append(filtered, a)
+		}
+	}
+	out.ExcludeReviews, err = store.ReviewLowBalanceExcludes(context.Background(), lowExcluded, settings.WindowDays())
+	if err != nil {
+		return out, fmt.Errorf("review excluded accounts: %w", err)
+	}
+	accts = filtered
 	out.PrepaidScanned = len(accts)
 
 	since := out.AsOf.AddDate(0, 0, -lookbackDays)
@@ -90,7 +114,7 @@ func ReconMissReports(n9e *ctx.Context, lookbackDays int) (MissReportResult, err
 			BalanceUSD:       a.Balance,
 			CurrentState:     state,
 			LastAlertAt:      firstTime(lastAt, cfgLast),
-			Reason:           "balance<=0 without WARN/CRITICAL record in lookback",
+			Reason:           "余额不大于零，回看期间没有成功发送的余额预警",
 		})
 	}
 	return out, nil

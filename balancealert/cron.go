@@ -35,7 +35,7 @@ func StartCron(n9e *ctx.Context) {
 var startCronJobs = startCronJobsProd
 
 func startCronJobsProd(n9e *ctx.Context) {
-	c := cron.New()
+	c := newBalanceCron()
 	_, err := c.AddFunc(staticRunSpec, func() {
 		stats, err := RunOnce(n9e, nil)
 		if err != nil {
@@ -76,13 +76,30 @@ func startCronJobsProd(n9e *ctx.Context) {
 		res, err := ReconMissReports(n9e, 7)
 		if err != nil {
 			logger.Errorf("balancealert miss-report cron: %v", err)
+			settings, settingsErr := models.BalanceAlertSettingsGet(n9e)
+			if settingsErr == nil && settings.AlertEnabled() {
+				if noticeErr := sendReconOpsNotice(settings, "余额预警漏报对账执行失败，请检查服务日志并处理。"); noticeErr != nil {
+					logger.Errorf("balancealert miss-report failure notification: %v", noticeErr)
+				}
+			}
 			return
 		}
 		if res.Disabled {
 			logger.Info("balancealert miss-report cron skipped: globally disabled")
 			return
 		}
-		logger.Infof("balancealert miss-report cron: scanned=%d misses=%d", res.PrepaidScanned, len(res.Misses))
+		logger.Infof("balancealert miss-report cron: scanned=%d misses=%d exclude_reviews=%d", res.PrepaidScanned, len(res.Misses), len(res.ExcludeReviews))
+		for _, r := range res.ExcludeReviews {
+			logger.Warningf("balancealert exclude review: account=%s name=%s balance=%.2f reason=%s", r.BillingAccountID, r.Name, r.BalanceUSD, r.Reason)
+		}
+		if len(res.ExcludeReviews) > 0 || len(res.Misses) > 0 {
+			settings, err := models.BalanceAlertSettingsGet(n9e)
+			if err != nil {
+				logger.Errorf("balancealert exclude review settings: %v", err)
+			} else if err := notifyReconFindings(settings, res.Misses, res.ExcludeReviews); err != nil {
+				logger.Errorf("balancealert exclude review notification: %v", err)
+			}
+		}
 		for _, m := range res.Misses {
 			logger.Warningf("balancealert miss-report: account=%s name=%s balance=%.2f reason=%s",
 				m.BillingAccountID, m.Name, m.BalanceUSD, m.Reason)
@@ -104,6 +121,8 @@ func startCronJobsProd(n9e *ctx.Context) {
 	c.Start()
 	logger.Info("balancealert cron started (static: every 15 minutes, dynamic: daily at 10:00, miss-report: daily at 08:05, credit-exclude refresh: daily at 07:30 Asia/Shanghai)")
 }
+
+func newBalanceCron() *cron.Cron { return cron.New(cron.WithLocation(locShanghai)) }
 
 // newExcludeRefreshCron 构造名单刷新调度器（只注册，不启动）。
 //

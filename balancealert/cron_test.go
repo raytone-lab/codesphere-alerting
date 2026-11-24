@@ -231,3 +231,24 @@ func TestStartCronRegistersAllSchedules(t *testing.T) {
 		}
 	}
 }
+
+func TestDailySchedulesUseShanghaiTime(t *testing.T) {
+	prev := time.Local
+	time.Local = time.UTC
+	t.Cleanup(func() { time.Local = prev })
+	c := newBalanceCron()
+	for _, tc := range []struct {
+		spec         string
+		hour, minute int
+	}{{dynamicRunSpec, 10, 0}, {missReportRunSpec, 8, 5}} {
+		id, err := c.AddFunc(tc.spec, func() {})
+		if err != nil {
+			t.Fatal(err)
+		}
+		from := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC).In(c.Location())
+		next := c.Entry(id).Schedule.Next(from).In(locShanghai)
+		if next.Hour() != tc.hour || next.Minute() != tc.minute {
+			t.Errorf("%s next=%s", tc.spec, next)
+		}
+	}
+}

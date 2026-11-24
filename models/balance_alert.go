@@ -99,21 +99,21 @@ func (BalanceAlertRecord) TableName() string {
 }
 
 type BalanceAlertSettings struct {
-	Enabled                 *bool    `json:"enabled"`
-	SendMode                string   `json:"send_mode"`
-	PilotReceivers          []string `json:"pilot_receivers,omitempty"` // legacy; prefer PilotNotifyRuleID
-	VoucherThresholdUSD     float64  `json:"voucher_threshold_usd"`
-	LastRechargePct         float64  `json:"last_recharge_pct"`
-	CriticalRepeatDays      int      `json:"critical_repeat_days"`
+	Enabled             *bool    `json:"enabled"`
+	SendMode            string   `json:"send_mode"`
+	PilotReceivers      []string `json:"pilot_receivers,omitempty"` // legacy; prefer PilotNotifyRuleID
+	VoucherThresholdUSD float64  `json:"voucher_threshold_usd"`
+	LastRechargePct     float64  `json:"last_recharge_pct"`
+	CriticalRepeatDays  int      `json:"critical_repeat_days"`
 	// 指针语义：nil 表示调用方没有提供该字段（沿用已存值），不是「0 天」。
 	// 新增一个可选调参字段不该让仍按旧 schema 调用的脚本整体失败。
-	CreditAdvanceWindowDays *int     `json:"credit_advance_window_days"`
-	DatasourceID            int64    `json:"datasource_id"`
-	SmsWebhook              string   `json:"sms_webhook,omitempty"` // legacy; prefer CustomerNotifyRuleID
-	CustomerPhoneSQLHint    string   `json:"customer_phone_sql_hint,omitempty"`
-	PilotNotifyRuleID       int64    `json:"pilot_notify_rule_id"`
-	CustomerNotifyRuleID    int64    `json:"customer_notify_rule_id"`
-	DynamicNotifyRuleID     int64    `json:"dynamic_notify_rule_id"`
+	CreditAdvanceWindowDays *int   `json:"credit_advance_window_days"`
+	DatasourceID            int64  `json:"datasource_id"`
+	SmsWebhook              string `json:"sms_webhook,omitempty"` // legacy; prefer CustomerNotifyRuleID
+	CustomerPhoneSQLHint    string `json:"customer_phone_sql_hint,omitempty"`
+	PilotNotifyRuleID       int64  `json:"pilot_notify_rule_id"`
+	CustomerNotifyRuleID    int64  `json:"customer_notify_rule_id"`
+	DynamicNotifyRuleID     int64  `json:"dynamic_notify_rule_id"`
 }
 
 func lastRechargePctPresent(raw string) bool {
@@ -396,12 +396,12 @@ func BalanceAlertRecordSetReview(ctx *ctx.Context, id, review string) error {
 }
 
 // BalanceAlertRecordHasLevelSince reports whether any WARN/CRITICAL record
-// (any status) exists for the account since the given time. Used by miss-report recon.
+// with successful delivery exists for the account since the given time. Used by miss-report recon.
 func BalanceAlertRecordHasLevelSince(ctx *ctx.Context, accountID string, since time.Time) (bool, *time.Time, error) {
 	var rec BalanceAlertRecord
 	err := DB(ctx).Where(
-		"billing_account_id = ? AND level IN (?, ?) AND created_at >= ?",
-		accountID, BalanceAlertStateWarn, BalanceAlertStateCritical, since,
+		"billing_account_id = ? AND level IN (?, ?) AND status = ? AND sent_at IS NOT NULL AND created_at >= ?",
+		accountID, BalanceAlertStateWarn, BalanceAlertStateCritical, "SENT", since,
 	).Order("created_at desc").First(&rec).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil, nil

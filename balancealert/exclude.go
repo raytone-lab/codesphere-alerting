@@ -41,15 +41,24 @@ const excludeActivitySQL = `
          (al.approved_credit_usd - COALESCE(al.settled_usd, 0) > 0.0001) AS open_debt,
          (al.approved_credit_usd > 0
           AND al.created_at > now() - make_interval(days => ?::int)) AS recent_advance,
-         FALSE AS recent_settlement
+         FALSE AS recent_settlement,
+         FALSE AS uncertain_settlement
   FROM balance_consumption_allocations al
   -- 谓词刻意与部分索引 balance_allocations_account_funding_open_idx 完全一致，
   -- 使每日刷新走索引而不是全表扫。unapproved 行不产生任何标记，只为匹配索引。
   WHERE (al.approved_credit_usd > 0 OR al.unapproved_debt_usd > 0)
     AND al.billing_account_id IS NOT NULL
   UNION ALL
-  SELECT s.billing_account_id, FALSE, FALSE, TRUE
+  SELECT s.billing_account_id, FALSE, FALSE,
+         COALESCE(al.id IS NOT NULL AND al.billing_account_id = s.billing_account_id
+           AND al.source = s.debt_source AND al.funding_classification_complete
+           AND al.approved_credit_usd > 0 AND al.unapproved_debt_usd = 0, FALSE),
+         NOT COALESCE(al.id IS NOT NULL AND al.billing_account_id = s.billing_account_id
+           AND al.source = s.debt_source AND al.funding_classification_complete
+           AND ((al.approved_credit_usd > 0 AND al.unapproved_debt_usd = 0)
+             OR (al.approved_credit_usd = 0 AND al.unapproved_debt_usd > 0)), FALSE)
   FROM enterprise_credit_settlements s
+  LEFT JOIN balance_consumption_allocations al ON al.id = s.allocation_id
   -- 必须限定 debt_source：真预付费穿 0 后充值同样会产生 NEGATIVE_BALANCE
   -- 核销，不限定会把 TC-05 类企业误排最多一个窗口。
   WHERE s.debt_source = 'ENTERPRISE_CREDIT'
@@ -69,12 +78,13 @@ SELECT account_id,
        CASE
          WHEN bool_or(open_debt) THEN '` + models.ExcludeReasonOpenDebt + `'
          WHEN bool_or(recent_advance) THEN '` + models.ExcludeReasonRecentAdvance + `'
-         ELSE '` + models.ExcludeReasonRecentSettlement + `'
+         WHEN bool_or(recent_settlement) THEN '` + models.ExcludeReasonRecentSettlement + `'
+         ELSE '` + models.ExcludeReasonUncertainSettlement + `'
        END AS reason
 FROM (` + excludeActivitySQL + `) activity
 -- 只有 unapproved_debt 的行两标记皆假，必须过滤；否则 ELSE 分支会把它们
 -- 标成 RECENT_SETTLEMENT 并误排除。
-WHERE activity.open_debt OR activity.recent_advance OR activity.recent_settlement
+WHERE activity.open_debt OR activity.recent_advance OR activity.recent_settlement OR activity.uncertain_settlement
 GROUP BY account_id
 `
 
@@ -90,9 +100,10 @@ const excludeHitsSQL = `
 SELECT account_id,
        bool_or(open_debt) AS open_debt,
        bool_or(recent_advance) AS recent_advance,
-       bool_or(recent_settlement) AS recent_settlement
+       bool_or(recent_settlement) AS recent_settlement,
+       bool_or(uncertain_settlement) AS uncertain_settlement
 FROM (` + excludeActivitySQL + `) activity
-WHERE activity.open_debt OR activity.recent_advance OR activity.recent_settlement
+WHERE activity.open_debt OR activity.recent_advance OR activity.recent_settlement OR activity.uncertain_settlement
 GROUP BY account_id
 `
 

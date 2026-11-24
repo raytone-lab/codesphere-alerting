@@ -354,3 +354,27 @@ func TestBalanceAlertOTPRoundTrip(t *testing.T) {
 		t.Fatal("expired should not stay verified")
 	}
 }
+
+func TestMissReportRequiresSuccessfullySentNotification(t *testing.T) {
+	c := testBalanceAlertCtx(t)
+	now := time.Now()
+	records := []*BalanceAlertRecord{
+		{BillingAccountID: "failed", Level: BalanceAlertStateCritical, Status: "FAILED", CreatedAt: now},
+		{BillingAccountID: "dry", Level: BalanceAlertStateCritical, Status: "SENT", CreatedAt: now},
+		{BillingAccountID: "delivered", Level: BalanceAlertStateWarn, Status: "SENT", CreatedAt: now, SentAt: &now},
+	}
+	for _, r := range records {
+		if err := BalanceAlertRecordInsert(c, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		id   string
+		want bool
+	}{{"failed", false}, {"dry", false}, {"delivered", true}} {
+		got, _, err := BalanceAlertRecordHasLevelSince(c, tc.id, now.Add(-time.Hour))
+		if err != nil || got != tc.want {
+			t.Errorf("%s got=%v err=%v", tc.id, got, err)
+		}
+	}
+}

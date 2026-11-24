@@ -94,6 +94,8 @@ func createBillingSchema(t *testing.T, db *gorm.DB) {
 		`CREATE TABLE balance_consumption_allocations (
 			id bigserial PRIMARY KEY,
 			billing_account_id varchar(128),
+			source varchar(64) NOT NULL DEFAULT 'ENTERPRISE_CREDIT',
+			funding_classification_complete boolean NOT NULL DEFAULT true,
 			approved_credit_usd numeric(20,12) NOT NULL DEFAULT 0,
 			unapproved_debt_usd numeric(20,12) NOT NULL DEFAULT 0,
 			settled_usd numeric(20,12),
@@ -102,6 +104,7 @@ func createBillingSchema(t *testing.T, db *gorm.DB) {
 		`CREATE TABLE enterprise_credit_settlements (
 			id bigserial PRIMARY KEY,
 			billing_account_id varchar(128) NOT NULL,
+			allocation_id bigint,
 			debt_source varchar(64) NOT NULL,
 			occurred_at timestamptz NOT NULL
 		)`,
@@ -194,10 +197,15 @@ func creditConfig(t *testing.T, db *gorm.DB, account string, balance float64) {
 
 func settlement(t *testing.T, db *gorm.DB, account, source string, age int) {
 	t.Helper()
+	var id int64
+	if err := db.Raw(`INSERT INTO balance_consumption_allocations
+  (billing_account_id, source, approved_credit_usd, settled_usd, created_at)
+  VALUES (?, ?, 10, 10, ?) RETURNING id`, account, source, daysAgo(200)).Scan(&id).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Exec(`INSERT INTO enterprise_credit_settlements
-		(billing_account_id, debt_source, occurred_at) VALUES (?, ?, ?)`,
-		account, source, daysAgo(age)).Error; err != nil {
-		t.Fatalf("insert settlement %s: %v", account, err)
+  (billing_account_id, allocation_id, debt_source, occurred_at) VALUES (?, ?, ?, ?)`, account, id, source, daysAgo(age)).Error; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -267,7 +275,7 @@ func scanHits(t *testing.T, db *gorm.DB, windowDays int) map[string]CreditExclud
 	for rows.Next() {
 		var id string
 		var h CreditExcludeHits
-		if err := rows.Scan(&id, &h.OpenDebt, &h.RecentAdvance, &h.RecentSettlement); err != nil {
+		if err := rows.Scan(&id, &h.OpenDebt, &h.RecentAdvance, &h.RecentSettlement, &h.UncertainSettlement); err != nil {
 			t.Fatalf("scan hits row: %v", err)
 		}
 		out[id] = h
@@ -589,5 +597,48 @@ func TestExcludeReplaceIsAtomic(t *testing.T) {
 	}
 	if _, ok := ids["new-a"]; !ok || len(ids) != 1 {
 		t.Fatalf("replace must swap the whole list, got %v", ids)
+	}
+}
+
+// ENTERPRISE_CREDIT 是企业欠款来源标签，不能单独证明已批准授信。
+func TestExcludeSettlementFundingClassification(t *testing.T) {
+	db := pgTestDB(t)
+	insert := func(account, allocationAccount, source string, complete bool, approved, unapproved float64) {
+		t.Helper()
+		var id int64
+		if err := db.Raw(`INSERT INTO balance_consumption_allocations
+    (billing_account_id, source, funding_classification_complete, approved_credit_usd, unapproved_debt_usd, settled_usd, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`, allocationAccount, source, complete, approved, unapproved, approved, daysAgo(200)).Scan(&id).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Exec(`INSERT INTO enterprise_credit_settlements (billing_account_id, allocation_id, debt_source, occurred_at)
+    VALUES (?, ?, 'ENTERPRISE_CREDIT', ?)`, account, id, daysAgo(1)).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("touwen", "touwen", "ENTERPRISE_CREDIT", true, 0, 10)
+	insert("zuodian", "zuodian", "ENTERPRISE_CREDIT", true, 0, 10)
+	insert("credit", "credit", "ENTERPRISE_CREDIT", true, 10, 0)
+	insert("incomplete", "incomplete", "ENTERPRISE_CREDIT", false, 0, 0)
+	insert("mixed", "mixed", "ENTERPRISE_CREDIT", true, 1, 1)
+	insert("cross_account", "other", "ENTERPRISE_CREDIT", true, 0, 10)
+	insert("wrong_source", "wrong_source", "NEGATIVE_BALANCE", true, 0, 10)
+	if err := db.Exec(`INSERT INTO enterprise_credit_settlements (billing_account_id, allocation_id, debt_source, occurred_at)
+  VALUES ('orphan', 999999, 'ENTERPRISE_CREDIT', ?)`, daysAgo(1)).Error; err != nil {
+		t.Fatal(err)
+	}
+	got, hits := scanExcludes(t, db, 90), scanHits(t, db, 90)
+	for _, id := range []string{"touwen", "zuodian"} {
+		if _, ok := got[id]; ok {
+			t.Errorf("prepaid %s excluded: %v", id, got)
+		}
+	}
+	if got["credit"] != models.ExcludeReasonRecentSettlement {
+		t.Errorf("credit: %v", got)
+	}
+	for _, id := range []string{"incomplete", "mixed", "cross_account", "wrong_source", "orphan"} {
+		if got[id] != models.ExcludeReasonUncertainSettlement || !hits[id].UncertainSettlement {
+			t.Errorf("%s not marked uncertain: %v %+v", id, got, hits[id])
+		}
 	}
 }

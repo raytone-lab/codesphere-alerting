@@ -213,6 +213,9 @@ func buildSyntheticEvent(req SendRequest) *models.AlertCurEvent {
 		"pilot_line":      RenderPilotLine(name, req.Balance, req.Threshold, req.Level),
 		"severity_emoji":  severityEmoji(req.Level),
 	}
+	if strings.TrimSpace(req.CopyOverride) != "" {
+		ann["pilot_line"] = RenderCopy(req)
+	}
 	if req.TriggerType == models.TriggerTypeDynamic {
 		ann["remaining_days"] = FormatRemainingDays(req.DynamicDays)
 	}

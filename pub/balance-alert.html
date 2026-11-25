@@ -707,7 +707,7 @@
       <div class="dialog-head">
         <div>
           <h2 id="miss-title">漏报对账</h2>
-          <p>扫描余额 ≤ 0 且符合静态预警阈值条件的预付费企业，回查过去 7 天有无成功预警；无充值、无体验额度且无自定义阈值的账户不计入漏报。排除名单中的低余额企业另行复核。</p>
+          <p>检查余额不大于零的企业，找出近 7 天没有成功发送预警、可能需要补发的账户。无充值、无体验额度且无有效自定义阈值的账户不计入。排除名单中没有明确授信依据的低余额企业需核实是否误排除。</p>
         </div>
         <button type="button" id="close-miss" aria-label="关闭">关闭</button>
       </div>
@@ -1236,9 +1236,9 @@
       }
       const misses = Array.isArray(res.misses) ? res.misses : [];
       const reviews = Array.isArray(res.exclude_reviews) ? res.exclude_reviews : [];
-      $("#miss-summary").textContent = "扫描 " + (res.prepaid_scanned || 0) + " 家预付费企业，余额不大于零且近 " + (res.lookback_days || 7) + " 天无成功通知 " + misses.length + " 家；排除名单待复核 " + reviews.length + " 家。";
+      $("#miss-summary").textContent = "已检查 " + (res.prepaid_scanned || 0) + " 家未排除的企业：疑似漏发预警 " + misses.length + " 家；排除名单中需要核实是否误排除 " + reviews.length + " 家。";
       if (!misses.length && !reviews.length) {
-        $("#miss-rows").innerHTML = `<tr><td colspan="5"><div class="empty">无漏报</div></td></tr>`;
+        $("#miss-rows").innerHTML = `<tr><td colspan="5"><div class="empty">未发现疑似漏发或需要核实的排除账户</div></td></tr>`;
         return;
       }
       $("#miss-rows").innerHTML = misses.concat(reviews.map((r) => ({...r, current_state: "待复核"}))).map((m) => `<tr>

@@ -166,7 +166,7 @@ func opsNoticeTplContent(event *models.AlertCurEvent, channelIdent string) map[s
 	tpl := &models.MessageTemplate{
 		NotifyChannelIdent: channelIdent,
 		Content: map[string]string{
-			"title":   "余额预警对账通知",
+			"title":   "余额预警每日检查",
 			"content": "{{ index $event.AnnotationsJSON \"copy\" }}",
 			"text":    "{{ index $event.AnnotationsJSON \"copy\" }}",
 		},

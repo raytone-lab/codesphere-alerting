@@ -125,7 +125,10 @@ func TestOpsNoticeDingtalkHTTPContainsSummary(t *testing.T) {
 		_, _ = w.Write([]byte(`{"errcode":0}`))
 	}))
 	defer server.Close()
-	summary := "【余额预警对账】\n漏报候选：0 家。\n排除名单复核：1 家，历史核销分类需核实。\n时间：2026-11-25 08:05:00（北京时间）"
+	summary := "【余额预警每日检查】\n" + formatReconFindings(
+		[]MissReport{{BillingAccountID: "prepaid-1", Name: "预付费企业", BalanceUSD: -1}},
+		[]ExcludeReview{{BillingAccountID: "review-1", Name: "待核实企业", Reason: "未找到明确的授信活动"}},
+	) + "\n检查时间：2026-11-25 08:05:00（北京时间）"
 	event := buildSyntheticEvent(SendRequest{Mode: SendModePilot, OpsNotice: true, AccountID: "exclude-review", CopyOverride: summary})
 	ch := &models.NotifyChannelConfig{Ident: "dingtalk", RequestConfig: &models.RequestConfig{HTTPRequestConfig: &models.HTTPRequestConfig{
 		URL: server.URL, Method: "POST", Headers: map[string]string{"Content-Type": "application/json"}, RetryTimes: 1,
@@ -146,6 +149,22 @@ func TestOpsNoticeDingtalkHTTPContainsSummary(t *testing.T) {
 	}
 	if strings.Contains(text, "exclude-review") || strings.Contains(text, "余额 ¥0.00") {
 		t.Fatalf("synthetic account leaked: %q", text)
+	}
+	for _, want := range []string{"疑似漏发余额预警：1 家", "预付费企业（账户 prepaid-1）", "待核实企业（账户 review-1）", "未找到明确的授信活动", "检查时间：2026-11-25 08:05:00（北京时间）"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("message missing %q: %s", want, text)
+		}
+	}
+}
+
+func TestFormatReconFindingsLimitsDetails(t *testing.T) {
+	misses := make([]MissReport, 7)
+	for i := range misses {
+		misses[i] = MissReport{BillingAccountID: "same", Name: "企业\n名称"}
+	}
+	text := formatReconFindings(misses, nil)
+	if strings.Count(text, "企业 名称（账户 same）") != 5 || !strings.Contains(text, "其余 2 家请在对账页面查看") || !strings.Contains(text, "需要核实是否误排除：0 家") {
+		t.Fatalf("unexpected formatted message: %s", text)
 	}
 }
 

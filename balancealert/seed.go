@@ -18,6 +18,14 @@ type seedTpl struct {
 	Weight             int
 }
 
+const reconNoticeTemplateIdent = "balance-alert-reconciliation-dingtalk"
+
+var reconNoticeTemplateContent = map[string]string{
+	"title":   "余额预警每日检查",
+	"content": "{{ index $event.AnnotationsJSON \"copy\" }}",
+	"text":    "{{ index $event.AnnotationsJSON \"copy\" }}",
+}
+
 var seedTemplates = []seedTpl{
 	{
 		Name:               "余额预警-试点钉钉",
@@ -28,6 +36,12 @@ var seedTemplates = []seedTpl{
 			"title":   "预付费余额预警",
 			"content": "{{ index $event.AnnotationsJSON \"severity_emoji\" }} 告警级别：{{ index $event.AnnotationsJSON \"level\" }}级\n告警时间：{{ timeformat $event.TriggerTime }}\n企业名称：{{ index $event.AnnotationsJSON \"enterprise_name\" }}\n事由签名：{{ index $event.AnnotationsJSON \"copy\" }}\n当次触发时值：{{ $value }}",
 		},
+	},
+	{
+		Name:               "余额预警-每日检查钉钉",
+		Ident:              reconNoticeTemplateIdent,
+		NotifyChannelIdent: "dingtalk",
+		Content:            reconNoticeTemplateContent,
 	},
 	{
 		Name:               "余额预警-短信-WARN",
@@ -226,6 +240,9 @@ func SeedMessageTemplates(n9e *ctx.Context) {
 			continue
 		}
 		if existing != nil {
+			if existing.UpdateBy != "" && existing.UpdateBy != "system" {
+				continue
+			}
 			if !seedContentEqual(existing.Content, s.Content) {
 				contentJSON, err := json.Marshal(s.Content)
 				if err != nil {

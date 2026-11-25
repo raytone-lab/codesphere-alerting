@@ -3842,9 +3842,23 @@ func isSlackIdent(ident string) bool {
 // 投递（RenderEvent：把错误文本当正文，保持既有行为）还是中止（RenderEventStrict）。
 func (t *MessageTemplate) renderField(key, msgTpl string, renderData map[string]interface{}) (interface{}, error) {
 	text := strings.Join(append(GetDefs(renderData), msgTpl), "")
+	funcs := tplx.NewTemplateFuncMap()
+	if events, ok := renderData["events"].([]*AlertCurEvent); ok && len(events) > 0 && events[0] != nil && events[0].Cate == "balance_alert" {
+		funcs["timeformat"] = func(ts int64, pattern ...string) string {
+			format := "2006-01-02 15:04:05"
+			if len(pattern) > 0 {
+				format = pattern[0]
+			}
+			loc, err := time.LoadLocation("Asia/Shanghai")
+			if err != nil {
+				loc = time.FixedZone("CST", 8*60*60)
+			}
+			return time.Unix(ts, 0).In(loc).Format(format)
+		}
+	}
 
 	if t.NotifyChannelIdent == "email" {
-		tpl, err := texttemplate.New(key).Funcs(tplx.TemplateFuncMap).Parse(text)
+		tpl, err := texttemplate.New(key).Funcs(funcs).Parse(text)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse template: %v", err)
 		}
@@ -3855,7 +3869,7 @@ func (t *MessageTemplate) renderField(key, msgTpl string, renderData map[string]
 		return body.String(), nil
 	}
 
-	tpl, err := template.New(key).Funcs(tplx.TemplateFuncMap).Parse(text)
+	tpl, err := template.New(key).Funcs(funcs).Parse(text)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse template: %v", err)
 	}

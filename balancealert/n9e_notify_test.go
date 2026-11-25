@@ -3,6 +3,7 @@ package balancealert
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -135,7 +136,10 @@ func TestOpsNoticeDingtalkHTTPContainsSummary(t *testing.T) {
 		Request: models.RequestDetail{Body: `{"msgtype":"markdown","markdown":{"title":"{{ $tpl.title }}","text":"{{ $tpl.content }}"}}`},
 	}}}
 	p := &provider.DingtalkProvider{}
-	result := p.Notify(context.Background(), &provider.NotifyRequest{Config: ch, Events: []*models.AlertCurEvent{event}, TplContent: opsNoticeTplContent(event, ch.Ident), HttpClient: server.Client()})
+	ctx := testSeedNotifyCtx(t)
+	SeedMessageTemplates(ctx)
+	sender := &N9eNotifySender{Ctx: ctx}
+	result := p.Notify(context.Background(), &provider.NotifyRequest{Config: ch, Events: []*models.AlertCurEvent{event}, TplContent: sender.opsNoticeTplContent(event, ch.Ident, ""), HttpClient: server.Client()})
 	if result.Err != nil {
 		t.Fatal(result.Err)
 	}
@@ -155,6 +159,53 @@ func TestOpsNoticeDingtalkHTTPContainsSummary(t *testing.T) {
 			t.Errorf("message missing %q: %s", want, text)
 		}
 	}
+}
+
+func TestReconTemplateUsesDatabaseAndPreservesEdits(t *testing.T) {
+	ctx := testSeedNotifyCtx(t)
+	SeedMessageTemplates(ctx)
+	tpl, err := models.MessageTemplateGet(ctx, "ident = ?", reconNoticeTemplateIdent)
+	if err != nil || tpl == nil {
+		t.Fatalf("seeded template: %v %v", tpl, err)
+	}
+	updated := map[string]string{"title": "运营检查", "content": "运营：{{ index $event.AnnotationsJSON \"copy\" }}", "text": "运营：{{ index $event.AnnotationsJSON \"copy\" }}"}
+	if err := models.DB(ctx).Model(tpl).Updates(map[string]interface{}{"content": `{"title":"运营检查","content":"运营：{{ index $event.AnnotationsJSON \"copy\" }}","text":"运营：{{ index $event.AnnotationsJSON \"copy\" }}"}`, "update_by": "operator"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	SeedMessageTemplates(ctx)
+	tpl, err = models.MessageTemplateGet(ctx, "ident = ?", reconNoticeTemplateIdent)
+	if err != nil || !seedContentEqual(tpl.Content, updated) {
+		t.Fatalf("operator changes lost: %v %v", tpl, err)
+	}
+	event := buildSyntheticEvent(SendRequest{CopyOverride: "详情", OpsNotice: true})
+	sender := &N9eNotifySender{Ctx: ctx}
+	got := sender.opsNoticeTplContent(event, "dingtalk", "")
+	if fmt.Sprint(got["title"]) != "运营检查" || fmt.Sprint(got["content"]) != "运营：详情" {
+		t.Fatalf("database template not used: %#v", got)
+	}
+}
+
+func TestReconTemplateMissingOrInvalidFallsBack(t *testing.T) {
+	ctx := testSeedNotifyCtx(t)
+	event := buildSyntheticEvent(SendRequest{CopyOverride: "检查详情", OpsNotice: true})
+	sender := &N9eNotifySender{Ctx: ctx}
+	check := func() {
+		t.Helper()
+		got := sender.opsNoticeTplContent(event, "dingtalk", "")
+		if fmt.Sprint(got["content"]) != "检查详情" {
+			t.Fatalf("fallback lost summary: %#v", got)
+		}
+	}
+	check()
+	SeedMessageTemplates(ctx)
+	tpl, err := models.MessageTemplateGet(ctx, "ident = ?", reconNoticeTemplateIdent)
+	if err != nil || tpl == nil {
+		t.Fatalf("seeded template: %v %v", tpl, err)
+	}
+	if err := models.DB(ctx).Model(tpl).Update("content", `{"title":"bad","content":"{{ invalid","text":"{{ invalid"}`).Error; err != nil {
+		t.Fatal(err)
+	}
+	check()
 }
 
 func TestFormatReconFindingsLimitsDetails(t *testing.T) {

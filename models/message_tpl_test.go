@@ -7,10 +7,25 @@ import (
 	"strings"
 	"testing"
 	texttemplate "text/template"
+	"time"
 	"unicode"
 
 	"github.com/ccfos/nightingale/v6/pkg/tplx"
 )
+
+func TestBalanceAlertTemplateTimeUsesShanghaiWithUTCProcess(t *testing.T) {
+	prev := time.Local
+	time.Local = time.UTC
+	t.Cleanup(func() { time.Local = prev })
+	ts := time.Date(2026, 11, 25, 0, 5, 0, 0, time.UTC).Unix()
+	tpl := &MessageTemplate{NotifyChannelIdent: "dingtalk", Content: map[string]string{"content": `{{timeformat $event.TriggerTime}}`}}
+	for _, tc := range []struct{ category, want string }{{"balance_alert", "2026-11-25 08:05:00"}, {"prometheus", "2026-11-25 00:05:00"}} {
+		got, err := tpl.RenderEventStrict([]*AlertCurEvent{{Cate: tc.category, TriggerTime: ts}}, "")
+		if err != nil || fmt.Sprint(got["content"]) != tc.want {
+			t.Fatalf("category %s: %v, %v; want %s", tc.category, got, err, tc.want)
+		}
+	}
+}
 
 // 与 eventsMessage 渲染链路一致：拼上 $event 等变量定义后，各语言模板都应能正常解析
 func TestNewTplMapLangVariantsParse(t *testing.T) {

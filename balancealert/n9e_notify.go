@@ -14,6 +14,7 @@ import (
 	"github.com/ccfos/nightingale/v6/memsto"
 	"github.com/ccfos/nightingale/v6/models"
 	"github.com/ccfos/nightingale/v6/pkg/ctx"
+	"github.com/toolkits/pkg/logger"
 )
 
 // N9eNotifySender routes PILOT/CUSTOMER through Nightingale notify rules
@@ -87,7 +88,7 @@ func (s *N9eNotifySender) Send(req SendRequest) SendResult {
 
 		tplContent := map[string]interface{}{}
 		if req.OpsNotice {
-			tplContent = opsNoticeTplContent(event, ch.Ident)
+			tplContent = s.opsNoticeTplContent(event, ch.Ident, siteURL)
 		} else if tpl != nil {
 			tplContent = tpl.RenderEvent(events, siteURL)
 		} else {
@@ -162,16 +163,24 @@ func (s *N9eNotifySender) Send(req SendRequest) SendResult {
 // Operations summaries must not be rendered by an account alert template:
 // existing templates can omit the summary and display meaningless zero values.
 // Render through MessageTemplate to retain channel-specific escaping.
-func opsNoticeTplContent(event *models.AlertCurEvent, channelIdent string) map[string]interface{} {
-	tpl := &models.MessageTemplate{
-		NotifyChannelIdent: channelIdent,
-		Content: map[string]string{
-			"title":   "余额预警每日检查",
-			"content": "{{ index $event.AnnotationsJSON \"copy\" }}",
-			"text":    "{{ index $event.AnnotationsJSON \"copy\" }}",
-		},
+func (s *N9eNotifySender) opsNoticeTplContent(event *models.AlertCurEvent, channelIdent, siteURL string) map[string]interface{} {
+	var tpl *models.MessageTemplate
+	if s.Ctx != nil && s.Ctx.IsCenter {
+		var err error
+		tpl, err = models.MessageTemplateGet(s.Ctx, "ident = ?", reconNoticeTemplateIdent)
+		if err != nil {
+			logger.Warningf("balancealert: cannot read reconciliation template, using default: %v", err)
+		}
 	}
-	return tpl.RenderEvent([]*models.AlertCurEvent{event}, "")
+	if tpl != nil && tpl.NotifyChannelIdent == channelIdent {
+		content, err := tpl.RenderEventStrict([]*models.AlertCurEvent{event}, siteURL)
+		if err == nil && content["content"] != nil && strings.TrimSpace(fmt.Sprint(content["content"])) != "" && content["text"] != nil && strings.TrimSpace(fmt.Sprint(content["text"])) != "" {
+			return content
+		}
+		logger.Warningf("balancealert: invalid reconciliation template, using default: %v", err)
+	}
+	fallback := &models.MessageTemplate{NotifyChannelIdent: channelIdent, Content: reconNoticeTemplateContent}
+	return fallback.RenderEvent([]*models.AlertCurEvent{event}, siteURL)
 }
 
 func matchNotifyConfig(nc *models.NotifyConfig, event *models.AlertCurEvent) error {
@@ -276,7 +285,7 @@ func fallbackTplContent(req SendRequest) map[string]interface{} {
 	}
 	body := fmt.Sprintf("%s 告警级别：%s级\n告警时间：%s\n企业名称：%s\n事由签名：%s\n当次触发时值：%.2f",
 		severityEmoji(req.Level), req.Level,
-		time.Now().Format("2006-01-02 15:04:05"),
+		time.Now().In(locShanghai).Format("2006-01-02 15:04:05")+"（北京时间）",
 		name,
 		RenderCopy(req),
 		req.Balance,

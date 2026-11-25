@@ -11,6 +11,7 @@ import (
 
 	"github.com/ccfos/nightingale/v6/alert/dispatch"
 	"github.com/ccfos/nightingale/v6/alert/sender/provider"
+	"github.com/ccfos/nightingale/v6/memsto"
 	"github.com/ccfos/nightingale/v6/models"
 )
 
@@ -113,6 +114,66 @@ func TestBuildSyntheticEvent(t *testing.T) {
 	}
 	if ev.AnnotationsJSON["pilot_line"] == "" || ev.AnnotationsJSON["copy"] == "" {
 		t.Fatalf("missing rendered copy fields: %v", ev.AnnotationsJSON)
+	}
+}
+
+func TestBalanceDingtalkDeliveryIncludesEnvironment(t *testing.T) {
+	t.Setenv("BALANCE_ALERT_ENV", "uat")
+	var payloads []map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		payloads = append(payloads, payload)
+		_, _ = w.Write([]byte(`{"errcode":0}`))
+	}))
+	defer server.Close()
+	ctx := testSeedNotifyCtx(t)
+	SeedMessageTemplates(ctx)
+	ruleCache := &memsto.NotifyRuleCacheType{}
+	ruleCache.Set(map[int64]*models.NotifyRule{1: {ID: 1, Enable: true, NotifyConfigs: []models.NotifyConfig{{ChannelID: 4, TemplateID: 19}}}}, 1, 1)
+	channelCache := memsto.NewNotifyChannelCache(ctx, memsto.NewSyncStats())
+	channelCache.Set(map[int64]*models.NotifyChannelConfig{4: {ID: 4, Name: "Dingtalk", Ident: "dingtalk", Enable: true, RequestType: "http", RequestConfig: &models.RequestConfig{HTTPRequestConfig: &models.HTTPRequestConfig{
+		URL: server.URL, Method: "POST", Headers: map[string]string{"Content-Type": "application/json"}, RetryTimes: 1,
+		Request: models.RequestDetail{Body: `{"msgtype":"markdown","markdown":{"title":"{{ $tpl.title }}","text":"{{ $tpl.content }}"}}`},
+	}}}}, 1, 1)
+	templateCache := &memsto.MessageTemplateCacheType{}
+	templateCache.Set(map[int64]*models.MessageTemplate{19: {NotifyChannelIdent: "dingtalk", Content: map[string]string{"title": "预付费余额预警", "content": "🟠【余额预警】\n{{ $event.AnnotationsJSON.enterprise_name }}"}}}, 1, 1)
+	sender := &N9eNotifySender{Ctx: ctx, NotifyRuleCache: ruleCache, NotifyChannelCache: channelCache, MessageTemplateCache: templateCache}
+	for _, req := range []SendRequest{
+		{Mode: SendModePilot, Level: StateWarn, Name: "测试企业", AccountID: "test-account", NotifyRuleID: 1},
+		{Mode: SendModePilot, Level: StateWarn, OpsNotice: true, CopyOverride: "【余额预警每日检查】\n测试结果", NotifyRuleID: 1},
+	} {
+		if result := sender.Send(req); result.Err != nil {
+			t.Fatalf("send: %v", result.Err)
+		}
+	}
+	if len(payloads) != 2 {
+		t.Fatalf("sent %d messages", len(payloads))
+	}
+	for _, payload := range payloads {
+		markdown := payload["markdown"].(map[string]interface{})
+		for _, key := range []string{"title", "text"} {
+			if !strings.HasPrefix(fmt.Sprint(markdown[key]), "【UAT】") {
+				t.Errorf("%s missing environment: %v", key, markdown[key])
+			}
+		}
+	}
+}
+
+func TestBalanceEnvironmentLabelFallback(t *testing.T) {
+	t.Setenv("BALANCE_ALERT_ENV", "")
+	if got := labelAlertText("【余额预警】"); got != "【未配置环境】【余额预警】" {
+		t.Fatalf("missing environment: %q", got)
+	}
+	t.Setenv("BALANCE_ALERT_ENV", "test")
+	if got := labelAlertText(labelAlertText("告警")); got != "【TEST】告警" {
+		t.Fatalf("duplicate label: %q", got)
+	}
+	t.Setenv("BALANCE_ALERT_ENV", `uat"<script>`)
+	if got := labelAlertText("告警"); got != "【未配置环境】告警" {
+		t.Fatalf("invalid environment: %q", got)
 	}
 }
 

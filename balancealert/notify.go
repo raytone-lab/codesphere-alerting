@@ -216,6 +216,7 @@ func Dispatch(httpClient HTTPClient, req SendRequest) SendResult {
 		if strings.TrimSpace(req.CopyOverride) != "" {
 			text = RenderCopy(req)
 		}
+		text = labelAlertText(text)
 		var lastErr error
 		receivers := make([]string, 0, len(req.PilotURLs))
 		for _, u := range req.PilotURLs {

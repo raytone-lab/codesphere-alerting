@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -93,6 +95,9 @@ func (s *N9eNotifySender) Send(req SendRequest) SendResult {
 			tplContent = tpl.RenderEvent(events, siteURL)
 		} else {
 			tplContent = fallbackTplContent(req)
+		}
+		if ch.Ident == models.Dingtalk {
+			tplContent = labelDingTalkContent(tplContent)
 		}
 		if req.Mode == SendModeCustomer {
 			tplContent = withAliyunSmsVars(req, tplContent)
@@ -209,6 +214,51 @@ func notifySync(nctx *ctx.Context, nc *dispatch.NotifyContext) *provider.NotifyR
 		}
 		return nc.Provider.Notify(context.Background(), req)
 	}
+}
+
+// Environment is configured separately for each deployment. Never infer it from
+// database contents, which may have been copied from another environment.
+func alertEnvironment() string {
+	env := strings.ToUpper(strings.TrimSpace(os.Getenv("BALANCE_ALERT_ENV")))
+	if env == "" {
+		return "未配置环境"
+	}
+	for _, c := range env {
+		if (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' {
+			return "未配置环境"
+		}
+	}
+	return env
+}
+
+func labelAlertText(text string) string {
+	prefix := "【" + alertEnvironment() + "】"
+	if strings.HasPrefix(text, prefix) {
+		return text
+	}
+	return prefix + text
+}
+
+// Mark both the DingTalk card title and the visible body, even when a shared
+// or operator-edited database template does not contain an environment field.
+func labelDingTalkContent(content map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(content))
+	for key, value := range content {
+		out[key] = value
+	}
+	for _, key := range []string{"title", "content", "text"} {
+		switch text := out[key].(type) {
+		case string:
+			if strings.TrimSpace(text) != "" {
+				out[key] = labelAlertText(text)
+			}
+		case template.HTML:
+			if strings.TrimSpace(string(text)) != "" {
+				out[key] = template.HTML(labelAlertText(string(text)))
+			}
+		}
+	}
+	return out
 }
 
 func severityEmoji(level string) string {

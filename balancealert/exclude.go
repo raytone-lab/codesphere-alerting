@@ -447,6 +447,7 @@ func NotifyPendingExcludeOpsAsync(n9e *ctx.Context) {
 // sendExcludeOpsNotice 是失败/恢复共用的投递实现：逐条 webhook 尽力发送，
 // 单条失败只记日志，不影响刷新结果与状态落库。返回是否至少送到一条。
 func sendExcludeOpsNotice(settings models.BalanceAlertSettings, text string) bool {
+	text = labelAlertText(text)
 	if len(settings.PilotReceivers) == 0 {
 		logger.Warningf("balancealert exclude refresh alert has no pilot webhook configured: %s", text)
 		return false

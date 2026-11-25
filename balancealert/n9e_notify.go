@@ -32,6 +32,9 @@ type N9eNotifySender struct {
 }
 
 func (s *N9eNotifySender) Send(req SendRequest) SendResult {
+	if req.OpsNotice && req.Mode != SendModePilot {
+		return SendResult{Err: fmt.Errorf("operations notices require PILOT mode")}
+	}
 	ruleID := req.NotifyRuleID
 	if ruleID <= 0 {
 		if s.Fallback != nil {
@@ -83,7 +86,9 @@ func (s *N9eNotifySender) Send(req SendRequest) SendResult {
 		}
 
 		tplContent := map[string]interface{}{}
-		if tpl != nil {
+		if req.OpsNotice {
+			tplContent = opsNoticeTplContent(event, ch.Ident)
+		} else if tpl != nil {
 			tplContent = tpl.RenderEvent(events, siteURL)
 		} else {
 			tplContent = fallbackTplContent(req)
@@ -152,6 +157,21 @@ func (s *N9eNotifySender) Send(req SendRequest) SendResult {
 		}
 	}
 	return out
+}
+
+// Operations summaries must not be rendered by an account alert template:
+// existing templates can omit the summary and display meaningless zero values.
+// Render through MessageTemplate to retain channel-specific escaping.
+func opsNoticeTplContent(event *models.AlertCurEvent, channelIdent string) map[string]interface{} {
+	tpl := &models.MessageTemplate{
+		NotifyChannelIdent: channelIdent,
+		Content: map[string]string{
+			"title":   "余额预警对账通知",
+			"content": "{{ index $event.AnnotationsJSON \"copy\" }}",
+			"text":    "{{ index $event.AnnotationsJSON \"copy\" }}",
+		},
+	}
+	return tpl.RenderEvent([]*models.AlertCurEvent{event}, "")
 }
 
 func matchNotifyConfig(nc *models.NotifyConfig, event *models.AlertCurEvent) error {

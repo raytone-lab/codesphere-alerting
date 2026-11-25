@@ -707,7 +707,7 @@
       <div class="dialog-head">
         <div>
           <h2 id="miss-title">漏报对账</h2>
-          <p>扫描余额 ≤ 0 的预付费企业，回查过去 7 天有无预警/紧急记录。漏报应为 0。</p>
+          <p>扫描余额 ≤ 0 且符合静态预警阈值条件的预付费企业，回查过去 7 天有无成功预警；无充值、无体验额度且无自定义阈值的账户不计入漏报。排除名单中的低余额企业另行复核。</p>
         </div>
         <button type="button" id="close-miss" aria-label="关闭">关闭</button>
       </div>

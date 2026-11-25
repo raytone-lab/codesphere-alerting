@@ -55,6 +55,10 @@ func ReconMissReports(n9e *ctx.Context, lookbackDays int) (MissReportResult, err
 	if err != nil {
 		return out, err
 	}
+	return reconMissReports(n9e, store, settings, out)
+}
+
+func reconMissReports(n9e *ctx.Context, store Store, settings models.BalanceAlertSettings, out MissReportResult) (MissReportResult, error) {
 	accts, err := store.ListPrepaid(context.Background())
 	if err != nil {
 		return out, fmt.Errorf("list prepaid: %w", err)
@@ -89,9 +93,17 @@ func ReconMissReports(n9e *ctx.Context, lookbackDays int) (MissReportResult, err
 	accts = filtered
 	out.PrepaidScanned = len(accts)
 
-	since := out.AsOf.AddDate(0, 0, -lookbackDays)
+	since := out.AsOf.AddDate(0, 0, -out.LookbackDays)
 	for _, a := range accts {
 		if a.Balance > 0 {
+			continue
+		}
+		cfg, err := models.BalanceAlertConfigGet(n9e, a.ID)
+		if err != nil {
+			return out, fmt.Errorf("read alert config for %s: %w", a.ID, err)
+		}
+		_, _, skip := ComputeThreshold(a.LastRecharge, a.HasVoucher, settings.VoucherThresholdUSD, settings.LastRechargePct)
+		if skip && (cfg == nil || !cfg.IsCustomThreshold()) {
 			continue
 		}
 		ok, lastAt, err := models.BalanceAlertRecordHasLevelSince(n9e, a.ID, since)
@@ -101,7 +113,6 @@ func ReconMissReports(n9e *ctx.Context, lookbackDays int) (MissReportResult, err
 		if ok {
 			continue
 		}
-		cfg, _ := models.BalanceAlertConfigGet(n9e, a.ID)
 		state := StateNormal
 		var cfgLast *time.Time
 		if cfg != nil {

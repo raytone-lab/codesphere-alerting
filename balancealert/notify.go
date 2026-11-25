@@ -30,7 +30,9 @@ type SendRequest struct {
 	Phone         string
 	Phones        []string
 	CopyOverride  string
-	NotifyRuleID  int64
+	// OpsNotice is a reconciliation summary, not an account balance alert.
+	OpsNotice    bool
+	NotifyRuleID int64
 	// Legacy HTTP fallback fields (used when NotifyRuleID is unset).
 	PilotURLs []string
 	SmsURL    string

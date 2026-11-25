@@ -3,6 +3,7 @@ package balancealert
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/ccfos/nightingale/v6/models"
 )
@@ -90,12 +91,13 @@ func notifyReconFindings(settings models.BalanceAlertSettings, misses []MissRepo
 	if len(reviews) == 0 && len(misses) == 0 {
 		return nil
 	}
-	text := fmt.Sprintf("余额预警漏报对账：%d 家余额不大于零且近期无成功通知，%d 家排除名单需复核。请在余额预警漏报对账页面查看。", len(misses), len(reviews))
+	text := fmt.Sprintf("漏报候选：%d 家余额不大于零且近期无成功通知。\n排除名单复核：%d 家，可能存在历史核销分类或授信活动需核实，不代表排除有误。\n请在余额预警漏报对账页面查看详情。", len(misses), len(reviews))
 	return sendReconOpsNotice(settings, text)
 }
 
 func sendReconOpsNotice(settings models.BalanceAlertSettings, text string) error {
-	req := SendRequest{Mode: SendModePilot, Level: StateWarn, Name: "排除名单复核", AccountID: "exclude-review", CopyOverride: text, NotifyRuleID: settings.PilotNotifyRuleID, PilotURLs: settings.PilotReceivers}
+	text = fmt.Sprintf("【余额预警对账】\n%s\n时间：%s（北京时间）", text, time.Now().In(locShanghai).Format("2006-01-02 15:04:05"))
+	req := SendRequest{Mode: SendModePilot, Level: StateWarn, Name: "排除名单复核", AccountID: "exclude-review", CopyOverride: text, OpsNotice: true, NotifyRuleID: settings.PilotNotifyRuleID, PilotURLs: settings.PilotReceivers}
 	if settings.PilotNotifyRuleID > 0 && defaultSnd != nil {
 		result := defaultSnd.Send(req)
 		if result.Err != nil {

@@ -1,6 +1,11 @@
 package balancealert
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/ccfos/nightingale/v6/alert/dispatch"
@@ -107,5 +112,46 @@ func TestBuildSyntheticEvent(t *testing.T) {
 	}
 	if ev.AnnotationsJSON["pilot_line"] == "" || ev.AnnotationsJSON["copy"] == "" {
 		t.Fatalf("missing rendered copy fields: %v", ev.AnnotationsJSON)
+	}
+}
+
+func TestOpsNoticeDingtalkHTTPContainsSummary(t *testing.T) {
+	var payload map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"errcode":0}`))
+	}))
+	defer server.Close()
+	summary := "【余额预警对账】\n漏报候选：0 家。\n排除名单复核：1 家，历史核销分类需核实。\n时间：2026-11-25 08:05:00（北京时间）"
+	event := buildSyntheticEvent(SendRequest{Mode: SendModePilot, OpsNotice: true, AccountID: "exclude-review", CopyOverride: summary})
+	ch := &models.NotifyChannelConfig{Ident: "dingtalk", RequestConfig: &models.RequestConfig{HTTPRequestConfig: &models.HTTPRequestConfig{
+		URL: server.URL, Method: "POST", Headers: map[string]string{"Content-Type": "application/json"}, RetryTimes: 1,
+		Request: models.RequestDetail{Body: `{"msgtype":"markdown","markdown":{"title":"{{ $tpl.title }}","text":"{{ $tpl.content }}"}}`},
+	}}}
+	p := &provider.DingtalkProvider{}
+	result := p.Notify(context.Background(), &provider.NotifyRequest{Config: ch, Events: []*models.AlertCurEvent{event}, TplContent: opsNoticeTplContent(event, ch.Ident), HttpClient: server.Client()})
+	if result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	markdown, ok := payload["markdown"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing markdown: %#v", payload)
+	}
+	text, _ := markdown["text"].(string)
+	if text != summary {
+		t.Fatalf("message=%q want=%q", text, summary)
+	}
+	if strings.Contains(text, "exclude-review") || strings.Contains(text, "余额 ¥0.00") {
+		t.Fatalf("synthetic account leaked: %q", text)
+	}
+}
+
+func TestOpsNoticeCannotUseCustomerMode(t *testing.T) {
+	result := (&N9eNotifySender{}).Send(SendRequest{Mode: SendModeCustomer, OpsNotice: true})
+	if result.Err == nil {
+		t.Fatal("operations notice must not be sent to customers")
 	}
 }
